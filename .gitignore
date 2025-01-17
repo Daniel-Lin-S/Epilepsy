@@ -1,7 +1,11 @@
-.conda/*
+.conda/
+venv/
+env/
 __pycache__
-figures/*
-data/*
+figures/
+data/
+dataset/
 patient_summary.csv
 summary.txt
 .DS_Store
+try_*.py

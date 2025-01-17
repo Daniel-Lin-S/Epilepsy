@@ -3,8 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Optional, Union
 
-from preprocess import get_raw_data, get_seizure_times
-
 
 def plot_channels(raw : RawEDF,
                   start_time: float, end_time: float,
@@ -103,38 +101,3 @@ def _check_times(start_time: float, end_time: float,
                 f'mark time {mark_time} should be in the interval'
                 f' [{start_time}, {end_time}]. '
             )
-
-
-if __name__ == '__main__':
-    patient_id = 'DA0441I5'
-    l_forward = 30
-    l_backward = 20
-    channels = np.arange(21, 26)
-    raw = get_raw_data('./data/seizure-data-annotated', patient_id)
-
-    onset_dict = get_seizure_times(raw, in_seconds=True, verbose=False)
-
-    ids = list(onset_dict.keys())
-    seizure_id = ids[0]
-
-    seizure_start_time = onset_dict[seizure_id]['start']
-    plot_channels(raw, seizure_start_time-l_forward,
-                  seizure_start_time+l_backward,
-                  channel_idxs = channels,
-                  mark_time=seizure_start_time,
-                  mark_name='seizure starts',
-                  title=f'ECG signals before and after seizure {seizure_id} starts',
-                  file_name=f'./figures/{patient_id}_seiz{seizure_id}.png')
-    
-    seizure_start_time = onset_dict[seizure_id]['start']
-    plot_channels(raw, seizure_start_time-(l_forward+l_backward),
-                  seizure_start_time,
-                  channel_idxs = channels,
-                  title=f'ECG signals before seizure starts',
-                  file_name=f'./figures/{patient_id}_seiz{seizure_id}_before.png')
-    
-    plot_channels(raw, 0,
-                  l_forward+l_backward,
-                  channel_idxs = channels,
-                  title=f'ECG signals with no seizure',
-                  file_name=f'./figures/{patient_id}_no_seiz.png')

@@ -6,10 +6,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 from threading import Lock
 
-from preprocess import get_seizure_times, get_raw_data
+from utils.preprocess import get_seizure_times, get_raw_data
 
 
-def generate_annotations(folder_path: str) -> None:
+def generate_annotations(folder_path: str, verbose: bool=False) -> None:
     """
     This function recursively search through all .edf files
     in the folder and its subdirectories to performs 3 tasks:
@@ -21,6 +21,8 @@ def generate_annotations(folder_path: str) -> None:
     in `{patient_id}.edf.seizures` file
     for all edf files.
 
+    Both summary files will be stored under the folder_path
+
     Args:
         folder_path (str): Path to the folder to search for .edf files.
     """
@@ -28,6 +30,7 @@ def generate_annotations(folder_path: str) -> None:
     header = True
     summary_lines = []
     file_lock = Lock()
+    summary_path = os.path.join(folder_path, 'summary.txt')
 
     # Use ThreadPoolExecutor to process files in parallel
     with ThreadPoolExecutor() as executor:
@@ -37,12 +40,15 @@ def generate_annotations(folder_path: str) -> None:
         for root, _, files in os.walk(folder_path):
             for file in files:
                 if file.endswith('.edf'):
+                    if verbose:
+                        print(f'processing {file}')
                     patient_id = os.path.splitext(file)[0]
 
                     # Submit tasks to the executor
                     futures.append(
                         executor.submit(
-                            _process_single_edf, root, patient_id, header, file_lock))
+                            _process_single_edf, root, patient_id,
+                            header, file_lock, summary_path))
 
                     if header:
                         header = False
@@ -58,22 +64,29 @@ def generate_annotations(folder_path: str) -> None:
             # Store the processed lines
             summary_lines.extend(lines)
 
-    # After all tasks are done, write the patient seizure counts
-    with open('patient_summary.csv', mode='w', newline='') as file:
+    # write the patient seizure counts
+    csv_path = os.path.join(folder_path, 'patient_summary.csv')
+    with open(csv_path, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(["Patient_ID", "Seizure_Count"])
         for patient_id, seizure_count in patient_seizure_counts.items():
             writer.writerow([patient_id, seizure_count])
 
-    # Optionally, write summary lines to a separate file if needed
-    with open('summary.txt', mode='a') as file:
+    # write the detailed summary of each file.
+    with open(summary_path, mode='a') as file:
         for line in summary_lines:
             file.write(line)
+
+    if verbose:
+        print(f'Summary files saved to {folder_path}/summary.txt'
+              f' and {folder_path}/patient_summary.csv')
+        print(f'Number of patients: {len(patient_seizure_counts)}')
 
 
 def _process_single_edf(root: str, patient_id: str,
                         header:bool,
-                        file_lock: Lock) -> Tuple[int, List[str]]:
+                        file_lock: Lock,
+                        summary_path: str) -> Tuple[int, List[str]]:
     raw = get_raw_data(root, patient_id)
     start_time = raw.info['meas_date']
     end_time = start_time + timedelta(seconds=raw.times[-1])
@@ -92,7 +105,7 @@ def _process_single_edf(root: str, patient_id: str,
             header_lines.append(f"Channel {idx + 1}: {ch_name}\n")
         header_lines.append("\n")
         with file_lock:  # avoid conflictions between threads
-            with open('summary.txt', mode='w') as file:
+            with open(summary_path, mode='w') as file:
                 for line in header_lines:
                     file.write(line)
                 

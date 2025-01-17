@@ -100,7 +100,7 @@ def get_seizure_times(
     # write into file or print
     if len(onset_dict.keys()) == 0 and verbose:
         print('No seizure found')
-    else:  # seizure exists
+    elif len(onset_dict.keys()) > 0:  # seizure exists
         if output_path:
             with open(output_path, 'w') as f:
                 for value in onset_dict.values():
@@ -204,12 +204,3 @@ def _onset_overlap_check(onset_dict: Dict[str, Dict[int, int]]) -> None:
                 f"Interval {i-1} ({intervals[i-1][0]}, {intervals[i-1][1]}) "
                 f"overlaps with Interval {i} ({intervals[i][0]}, {intervals[i][1]})"
             )
-
-
-if __name__ == '__main__':
-    patient_id = 'DA00102B'
-    file_path = './data/seizure-data-annotated'
-    raw = get_raw_data(file_path, patient_id)
-
-    get_seizure_times(raw,
-                      output_path=os.path.join(file_path, f'{patient_id}.edf.seizures'))
