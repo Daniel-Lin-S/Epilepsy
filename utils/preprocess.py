@@ -1,10 +1,11 @@
 from mne.io import read_raw_edf
 from mne.io.edf.edf import RawEDF
 import os
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, List, Tuple
 
 
-def get_raw_data(folder_path: str, patient_id: str) -> RawEDF:
+def load_raw_data(folder_path: str, patient_id: str,
+                  preload: bool=False) -> RawEDF:
     """
     Read raw data of a patient's ECG graph stored in
     an edf file.
@@ -15,10 +16,14 @@ def get_raw_data(folder_path: str, patient_id: str) -> RawEDF:
         the folder in which edf data files are stored.
     patient_id : str
         the unique patient id, e.g. DA0441I2
+    preload : bool
+        If True, the entire data will be loaded
+        to RAM for faster process. Otherwise,
+        the data is stored in disk.
     
     Return
     ------
-    raw : RawEDF
+    raw : mne.io.edf.edf.RawEDF
         the extracted data.
         Use raw[c, t] to extract signal at time stamp
         t of channel c.
@@ -46,9 +51,40 @@ def get_raw_data(folder_path: str, patient_id: str) -> RawEDF:
         raise FileNotFoundError(
             f"Corresponding EDF file not found: {file_path}")
 
-    raw = read_raw_edf(file_path, preload=False, verbose=False)
+    raw = read_raw_edf(file_path, preload=preload, verbose=False)
 
     return raw
+
+
+def load_raw_data_from_folder(
+        folder_path: str, preload: bool=False) -> List[RawEDF]:
+    """
+    Load all ECG data (.edf files) in the folder
+    into a list of RawEDF objects.
+
+    Parameters
+    ----------
+    folder_path : str
+        the folder in which edf data files are stored.
+    preload : bool
+        If True, the entire data will be loaded
+        to RAM for faster process. Otherwise,
+        the data is stored in disk. \n
+        Default is False
+
+    Return
+    ------
+    raw_data_list : List[mne.io.edf.edf.RawEDF]
+        each item is a EDF dataset
+    """
+    raw_data_list = []
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith('.edf'):
+                ecg_file = os.path.join(root, file)
+                raw_data = read_raw_edf(ecg_file, preload=preload)
+                raw_data_list.append(raw_data)
+    return raw_data_list
 
 
 def get_seizure_times(
@@ -100,7 +136,7 @@ def get_seizure_times(
     # write into file or print
     if len(onset_dict.keys()) == 0 and verbose:
         print('No seizure found')
-    elif len(onset_dict.keys()) > 0:  # seizure exists
+    else:  # seizure exists
         if output_path:
             with open(output_path, 'w') as f:
                 for value in onset_dict.values():
@@ -204,3 +240,28 @@ def _onset_overlap_check(onset_dict: Dict[str, Dict[int, int]]) -> None:
                 f"Interval {i-1} ({intervals[i-1][0]}, {intervals[i-1][1]}) "
                 f"overlaps with Interval {i} ({intervals[i][0]}, {intervals[i][1]})"
             )
+
+def read_seizure_times(seizure_file: str) -> List[Tuple[int, int]]:
+    """
+    Read seizure time stamps from a file,
+    supposed to be `{id}.edf.seizures`.
+
+    Parameter
+    ---------
+    seizure_file: str
+        path to the file storing seizure times
+
+    Return
+    ------
+    seizure_times : List[Tuple[int, int]]
+        each item contains a pair of
+        integers representing seizure
+        starting time and ending time
+    """
+    seizure_times = []
+    with open(seizure_file, 'r') as f:
+        for line in f:
+            parts = line.strip().split()
+            # Start and end time stamps
+            seizure_times.append((int(parts[0]), int(parts[1])))
+    return seizure_times

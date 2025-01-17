@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 from threading import Lock
 
-from utils.preprocess import get_seizure_times, get_raw_data
+from utils.preprocess import get_seizure_times, load_raw_data
 
 
 def generate_annotations(folder_path: str, verbose: bool=False) -> None:
@@ -87,7 +87,7 @@ def _process_single_edf(root: str, patient_id: str,
                         header:bool,
                         file_lock: Lock,
                         summary_path: str) -> Tuple[int, List[str]]:
-    raw = get_raw_data(root, patient_id)
+    raw = load_raw_data(root, patient_id)
     start_time = raw.info['meas_date']
     end_time = start_time + timedelta(seconds=raw.times[-1])
     sampling_rate = raw.info['sfreq']
@@ -132,4 +132,6 @@ def _process_single_edf(root: str, patient_id: str,
 
 
 if __name__ == '__main__':
-    generate_annotations('./data/seizure-data-annotated/')
+    folder_input = input(
+        "Enter the folder path in which the edf data files are stored: ")
+    generate_annotations(folder_input, verbose=True)
