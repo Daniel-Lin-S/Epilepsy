@@ -4,3 +4,4 @@ figures/*
 data/*
 patient_summary.csv
 summary.txt
+.DS_Store
