@@ -5,6 +5,7 @@ __pycache__
 figures/
 data/
 dataset/
+samples/
 patient_summary.csv
 summary.txt
 .DS_Store

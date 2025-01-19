@@ -37,7 +37,7 @@ def plot_channels(raw : RawEDF,
     file_name : str, optional
         if provided,
         the figure will be saved instead of shown. \n
-        e.g. 'figures/ECG.png'
+        e.g. 'figures/EEG.png'
     """
     _check_times(start_time, end_time, mark_time)
 

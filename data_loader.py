@@ -25,7 +25,7 @@ def _extract_samples(
     Parameters
     ----------
     raw_data : mne.io.edf.raw.RawEDF
-        The RawEDF object containing the ECG data for the patient.
+        The RawEDF object containing the EEG data for the patient.
     
     seizure_times : List[Tuple[int, int]]
         A list of tuples representing the
@@ -112,9 +112,9 @@ def build_classification_samples(
         folder_path: str, output_file: Optional[str]=None,
         **kwargs) -> Union[None, Tuple[np.ndarray, np.ndarray]]:
     """    
-    Obtain positive and negative samples from .edf
-    and .edf.seizure files, and transform them as
-    x y pairs for model training.
+    Obtain positive and negative samples from EEG signals
+    stored in .edf and .edf.seizure files,
+    and transform them as x y pairs for model training.
     
     Parameters
     ----------
@@ -140,8 +140,8 @@ def build_classification_samples(
         0 - no seizure
         1 - seizure
     """
-    samples = []
-    labels = []
+    samples = []  # store EEG signals
+    labels = []   # store 0 1 labels
 
     # Go through all the files in the directory
     for root, _, files in os.walk(folder_path):
@@ -179,7 +179,7 @@ def build_classification_samples(
 
     if output_file:
         with h5py.File(output_file, 'w') as f:
-            f.create_dataset('x', data=samples)  # ECG samples
+            f.create_dataset('x', data=samples)
             f.create_dataset('y', data=labels)
     else:
         return samples, labels
@@ -199,7 +199,7 @@ def read_samples(file_path: str) -> Tuple[np.ndarray, np.ndarray]:
     Return
     -------
     samples, labels : numpy.ndarray
-        of shape [num_samples, sample_length, num_channels]
+        of shape [num_samples, num_channels, sample_length]
         and [num_samples,] respectively. \n
         The labels are 0 and 1s.
         0 - no seizure

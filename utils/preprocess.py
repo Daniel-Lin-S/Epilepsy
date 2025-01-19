@@ -1,13 +1,14 @@
 from mne.io import read_raw_edf
 from mne.io.edf.edf import RawEDF
 import os
+import re
 from typing import Optional, Dict, Union, List, Tuple
 
 
 def load_raw_data(folder_path: str, patient_id: str,
                   preload: bool=False) -> RawEDF:
     """
-    Read raw data of a patient's ECG graph stored in
+    Read raw data of a patient's EEG graph stored in
     an edf file.
 
     Parameters
@@ -59,7 +60,7 @@ def load_raw_data(folder_path: str, patient_id: str,
 def load_raw_data_from_folder(
         folder_path: str, preload: bool=False) -> List[RawEDF]:
     """
-    Load all ECG data (.edf files) in the folder
+    Load all EEG data (.edf files) in the folder
     into a list of RawEDF objects.
 
     Parameters
@@ -81,8 +82,8 @@ def load_raw_data_from_folder(
     for root, _, files in os.walk(folder_path):
         for file in files:
             if file.endswith('.edf'):
-                ecg_file = os.path.join(root, file)
-                raw_data = read_raw_edf(ecg_file, preload=preload)
+                eeg_file = os.path.join(root, file)
+                raw_data = read_raw_edf(eeg_file, preload=preload)
                 raw_data_list.append(raw_data)
     return raw_data_list
 
@@ -265,3 +266,30 @@ def read_seizure_times(seizure_file: str) -> List[Tuple[int, int]]:
             # Start and end time stamps
             seizure_times.append((int(parts[0]), int(parts[1])))
     return seizure_times
+
+def read_sampling_rate(file_path: str) -> int:
+    """
+    Extracts the sampling rate (in Hz)
+    as an integer from the 'summary.txt' file.
+    
+    :param file_path: str - The path to the summary.txt file.
+    :return: int - The extracted sampling rate, or None if not found.
+    """
+    try:
+        # Open the file
+        with open(file_path, 'r') as file:
+            for line in file:
+                # Search for the pattern "Data Sampling Rate: <number> Hz"
+                match = re.search(r"Data Sampling Rate:\s*(\d+)\s*Hz", line)
+                if match:
+                    return int(match.group(1))
+        # Return None if the line is not found
+        print(f"Sampling rate not found in the file: {file_path}")
+        return None
+    except FileNotFoundError:
+        print(
+            f"The file '{file_path}' was not found. "
+            "Please also check that you have run annotation.py"
+            " before running this function."
+        )
+        return None
