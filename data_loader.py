@@ -7,6 +7,7 @@ import random
 from typing import List, Tuple, Optional, Union
 
 from utils.preprocess import read_seizure_times
+from utils.tools import check_labels
 
 def _extract_samples(
         raw_data: RawEDF,
@@ -128,8 +129,8 @@ def build_classification_samples(
         and this function returns nothing. 
 
     kwargs : Any
-        Passed to extract_samples. e.g. sample time, preicetal time,
-        n_negativem, safe_gap. (see docstring of extract_samples)
+        Passed to extract_samples. e.g. sample_time, preicetal_time,
+        n_negative, safe_gap. (see docstring of extract_samples)
 
     Return
     -------
@@ -142,11 +143,13 @@ def build_classification_samples(
     """
     samples = []  # store EEG signals
     labels = []   # store 0 1 labels
+    flag = True
 
     # Go through all the files in the directory
     for root, _, files in os.walk(folder_path):
         for file in files:
             if file.endswith(".edf"):
+                flag = False
                 patient_id = os.path.splitext(file)[0]
                 edf_file_path = os.path.join(root, file)
 
@@ -173,9 +176,16 @@ def build_classification_samples(
                     samples.append(neg_samples)
                     labels.append(np.zeros(neg_samples.shape[0]))
 
+    if flag:
+        raise FileNotFoundError(
+            'Found no edf file in the provided folder'
+            f' {folder_path}.'
+        )
+
     # Convert lists to numpy arrays and store them
     samples = np.concatenate(samples, axis=0)
     labels = np.concatenate(labels, axis=0)
+    check_labels(labels)
 
     if output_file:
         with h5py.File(output_file, 'w') as f:
