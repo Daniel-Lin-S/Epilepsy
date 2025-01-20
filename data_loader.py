@@ -43,7 +43,10 @@ def _extract_samples(
 
     n_negative : int, optional
         Number of negative samples to draw. \n
-        Default is 5.
+        Default is 5. \n
+        Set it to -1 to use same
+        number of negative samples
+        as positive samples.
     
     safe_gap : float, optional
         The minimum distance (in seconds) between negative samples
@@ -79,6 +82,9 @@ def _extract_samples(
                 f', actual length {start_idx / sfreq} s. \n'
                 'Please reduce preictal_time or sample_length.'
             )
+    
+    if n_negative == -1:
+        n_negative = len(positive_samples)
 
     # Extract negative samples (random samples away from seizures)
     attempts = 0
@@ -186,6 +192,10 @@ def build_classification_samples(
     samples = np.concatenate(samples, axis=0)
     labels = np.concatenate(labels, axis=0)
     check_labels(labels)
+
+    print(f'Extracted {samples.shape[0]} samples')
+    print(f'Positive samples: {sum(labels == 1)}')
+    print(f'Negative samples: {sum(labels == 0)}')
 
     if output_file:
         with h5py.File(output_file, 'w') as f:

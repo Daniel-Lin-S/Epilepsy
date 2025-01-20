@@ -10,8 +10,9 @@ def check_labels(y: Union[np.ndarray, List[int]]):
         raise ValueError(
             'y should be a 1 dimensional array'
         )
-    if 0 not in np.unique(y) or 1 not in np.unique(y):
+    labels = np.unique(y)
+    if 0 not in labels or 1 not in labels:
         raise Exception(
-            'y must have both positive and negative labels'
-            ': 0 and 1'
+            'y must have both positive (1) and negative (0) labels'
+            f': 0 and 1. Labels: {labels}'
         )
