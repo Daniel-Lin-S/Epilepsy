@@ -48,7 +48,7 @@ def plot_channels(raw : RawEDF,
     sf = raw.info['sfreq']  # sampling frequency
     start_stamp = int(start_time * sf)
     end_stamp = int(end_time * sf)
-    data, times = raw[:, start_stamp:end_stamp]  # (channels, length)
+    data, times = raw[:, start_stamp:end_stamp]  # data : (channels, length)
 
     # Plot the selected channels
     n_channels_plot = len(channel_idxs)

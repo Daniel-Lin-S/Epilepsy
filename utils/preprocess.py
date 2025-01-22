@@ -249,7 +249,7 @@ def read_seizure_times(seizure_file: str) -> List[Tuple[int, int]]:
 
     Parameter
     ---------
-    seizure_file: str
+    seizure_file : str
         path to the file storing seizure times
 
     Return

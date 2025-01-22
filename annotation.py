@@ -32,7 +32,6 @@ def generate_annotations(folder_path: str, verbose: bool=False) -> None:
     file_lock = Lock()
     summary_path = os.path.join(folder_path, 'summary.txt')
 
-    # Use ThreadPoolExecutor to process files in parallel
     with ThreadPoolExecutor() as executor:
         futures = []
         
@@ -53,15 +52,9 @@ def generate_annotations(folder_path: str, verbose: bool=False) -> None:
                     if header:
                         header = False
 
-        # Process results as they complete
         for future in as_completed(futures):
-            # Retrieve the result for the completed future
             n_seizures, lines, patient_id = future.result()
-
-            # Store seizure count for each patient
             patient_seizure_counts[patient_id] = n_seizures
-
-            # Store the processed lines
             summary_lines.extend(lines)
 
     # write the patient seizure counts

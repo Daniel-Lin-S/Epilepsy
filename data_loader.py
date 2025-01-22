@@ -9,9 +9,140 @@ from typing import List, Tuple, Optional, Union
 from utils.preprocess import read_seizure_times
 from utils.tools import check_labels
 
+
+def build_classification_samples(
+        folder_path: str, output_file: Optional[str]=None,
+        selected_channels: Optional[List[str]]=None,
+        verbose: bool=True,
+        **kwargs) -> Union[None, Tuple[np.ndarray, np.ndarray]]:
+    """    
+    Obtain positive (ictal) and negative (non-ictal) samples from EEG signals
+    stored in .edf and .edf.seizure files,
+    and transform them as x y pairs for model training.
+
+    Parameters
+    ----------
+    folder_path : str
+        The folder path containing the `.edf` files
+        and `.edf.seizures` files.
+    
+    output_file : str
+        If provided, the extracted dataset
+        and labels will be saved in HDF5 format,
+        and this function returns nothing.
+    
+    selected_channels : List[str], optional
+        If given, only data from these channels will be kept.
+    
+    verbose : bool, optional
+        if True, print the information of
+        classification samples extracted.
+
+    kwargs : Any
+        Passed to extract_samples. e.g. sample_time, preicetal_time,
+        n_negative, safe_gap. (see docstring of extract_samples)
+
+    Return
+    -------
+    samples, labels : numpy.ndarray
+        of shape [num_samples, sample_length, num_channels]
+        and [num_samples,] respectively. \n
+        The labels are 0 and 1s.
+        0 - no seizure
+        1 - seizure
+    """
+    samples = []  # store EEG signals
+    labels = []   # store 0 1 labels
+    flag = True
+
+    # Go through all the files in the directory
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith(".edf"):
+                flag = False
+                patient_id = os.path.splitext(file)[0]
+                edf_file_path = os.path.join(root, file)
+
+                raw_data = mne.io.read_raw_edf(
+                    edf_file_path, preload=False, verbose=False)
+
+                seizure_file = os.path.join(root, f"{patient_id}.edf.seizures")
+                if not os.path.exists(seizure_file):
+                    raise FileNotFoundError(
+                        'Cannot find seizure time stamps '
+                        'Please run annotation.py before '
+                        'loading data.'
+                    )
+                seizure_times = read_seizure_times(seizure_file)
+
+                # Extract positive and negative samples
+                pos_samples, neg_samples = _extract_samples(
+                    raw_data, seizure_times, selected_channels, **kwargs)
+
+                if pos_samples.shape[0] > 0:
+                    samples.append(pos_samples)
+                    labels.append(np.ones(pos_samples.shape[0]))
+                if neg_samples.shape[0] > 0:
+                    samples.append(neg_samples)
+                    labels.append(np.zeros(neg_samples.shape[0]))
+
+    if flag:
+        raise FileNotFoundError(
+            'Found no edf file in the provided folder'
+            f' {folder_path}.'
+        )
+
+    # Convert lists to numpy arrays and store them
+    samples = np.concatenate(samples, axis=0)
+    labels = np.concatenate(labels, axis=0)
+    check_labels(labels)
+
+    if verbose:
+        print(f'Extracted {samples.shape[0]} samples'
+              f'with {samples.shape[1]} channels and '
+              f'{samples.shape[2]} time stamps')
+        print(f'Positive samples: {sum(labels == 1)}')
+        print(f'Negative samples: {sum(labels == 0)}')
+
+    if output_file:
+        with h5py.File(output_file, 'w') as f:
+            f.create_dataset('x', data=samples)
+            f.create_dataset('y', data=labels)
+    else:
+        return samples, labels
+
+
+def read_samples(file_path: str) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Read samples and labels from h5 file.
+    (assumed to be created by `process_data_and_store`)
+
+    Parameter
+    ---------
+    file_path : str
+        The path where the extracted dataset
+        is saved in HDF5 format.
+    
+    Return
+    -------
+    samples, labels : numpy.ndarray
+        of shape [num_samples, num_channels, sample_length]
+        and [num_samples,] respectively. \n
+        The labels are 0 and 1s.
+        0 - no seizure
+        1 - seizure
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f'Cannot find file {file_path}')
+
+    with h5py.File(file_path, 'r') as f:
+        return f['x'][:], f['y'][:]
+
+
 def _extract_samples(
         raw_data: RawEDF,
         seizure_times: List[Tuple[int, int]],
+        selected_channels: Optional[List[str]]=None,
         sample_time: float=10.0, preictal_time: float=10.0,
         n_negative: int=5,
         safe_gap: float=300.0
@@ -31,6 +162,9 @@ def _extract_samples(
     seizure_times : List[Tuple[int, int]]
         A list of tuples representing the
         seizure start and end time stamps.
+
+    selected_channels : List[str]
+        If given, only data from these channels will be kept.
     
     sample_time : float, optional
         The length of each sample in samples. \n
@@ -73,8 +207,11 @@ def _extract_samples(
         pre_ictal_end = pre_ictal_start + sample_length
 
         if pre_ictal_start >= 0:
+            if selected_channels:
+                raw_data_selected = raw_data.pick(selected_channels)
             positive_samples.append(
-                raw_data.get_data(start=pre_ictal_start, stop=pre_ictal_end))
+                raw_data_selected.get_data(
+                    start=pre_ictal_start, stop=pre_ictal_end))
         else:
             raise Exception(
                 'Not enough length before ictal stage. '
@@ -113,120 +250,3 @@ def _extract_samples(
         )
 
     return np.array(positive_samples), np.array(negative_samples)
-
-
-def build_classification_samples(
-        folder_path: str, output_file: Optional[str]=None,
-        **kwargs) -> Union[None, Tuple[np.ndarray, np.ndarray]]:
-    """    
-    Obtain positive and negative samples from EEG signals
-    stored in .edf and .edf.seizure files,
-    and transform them as x y pairs for model training.
-    
-    Parameters
-    ----------
-    folder_path : str
-        The folder path containing the `.edf` files
-        and `.edf.seizures` files.
-    
-    output_file : str
-        If provided, the extracted dataset
-        and labels will be saved in HDF5 format,
-        and this function returns nothing. 
-
-    kwargs : Any
-        Passed to extract_samples. e.g. sample_time, preicetal_time,
-        n_negative, safe_gap. (see docstring of extract_samples)
-
-    Return
-    -------
-    samples, labels : numpy.ndarray
-        of shape [num_samples, sample_length, num_channels]
-        and [num_samples,] respectively. \n
-        The labels are 0 and 1s.
-        0 - no seizure
-        1 - seizure
-    """
-    samples = []  # store EEG signals
-    labels = []   # store 0 1 labels
-    flag = True
-
-    # Go through all the files in the directory
-    for root, _, files in os.walk(folder_path):
-        for file in files:
-            if file.endswith(".edf"):
-                flag = False
-                patient_id = os.path.splitext(file)[0]
-                edf_file_path = os.path.join(root, file)
-
-                raw_data = mne.io.read_raw_edf(
-                    edf_file_path, preload=False, verbose=False)
-
-                seizure_file = os.path.join(root, f"{patient_id}.edf.seizures")
-                if not os.path.exists(seizure_file):
-                    raise FileNotFoundError(
-                        'Cannot find seizure time stamps '
-                        'Please run annotation.py before '
-                        'loading data.'
-                    )
-                seizure_times = read_seizure_times(seizure_file)
-
-                # Extract positive and negative samples
-                pos_samples, neg_samples = _extract_samples(
-                    raw_data, seizure_times, **kwargs)
-
-                if pos_samples.shape[0] > 0:
-                    samples.append(pos_samples)
-                    labels.append(np.ones(pos_samples.shape[0]))
-                if neg_samples.shape[0] > 0:
-                    samples.append(neg_samples)
-                    labels.append(np.zeros(neg_samples.shape[0]))
-
-    if flag:
-        raise FileNotFoundError(
-            'Found no edf file in the provided folder'
-            f' {folder_path}.'
-        )
-
-    # Convert lists to numpy arrays and store them
-    samples = np.concatenate(samples, axis=0)
-    labels = np.concatenate(labels, axis=0)
-    check_labels(labels)
-
-    print(f'Extracted {samples.shape[0]} samples')
-    print(f'Positive samples: {sum(labels == 1)}')
-    print(f'Negative samples: {sum(labels == 0)}')
-
-    if output_file:
-        with h5py.File(output_file, 'w') as f:
-            f.create_dataset('x', data=samples)
-            f.create_dataset('y', data=labels)
-    else:
-        return samples, labels
-
-
-def read_samples(file_path: str) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Read samples and labels from h5 file.
-    (assumed to be created by `process_data_and_store`)
-
-    Parameter
-    ---------
-    file_path : str
-        The path where the extracted dataset
-        is saved in HDF5 format.
-    
-    Return
-    -------
-    samples, labels : numpy.ndarray
-        of shape [num_samples, num_channels, sample_length]
-        and [num_samples,] respectively. \n
-        The labels are 0 and 1s.
-        0 - no seizure
-        1 - seizure
-    """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f'Cannot find file {file_path}')
-
-    with h5py.File(file_path, 'r') as f:
-        return f['x'][:], f['y'][:]
