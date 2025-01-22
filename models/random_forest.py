@@ -1,21 +1,20 @@
 import numpy as np
-import neurokit2 as nk
-import os
-from tqdm import tqdm
-from multiprocessing import Pool
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
+from argparse import Namespace
+from typing import Optional
 
-from feature_extraction import cwt_summary_features
-from utils.tools import check_labels
+from feature_extraction import extract_features_timefreq
+from utils.tools import check_labels, print_args
 
 
 def rf_classifier_timefreq(
     x: np.ndarray, y: np.ndarray, sfreq: float,
-    timefreq_method: str='cwt',
+    timefreq_method: str='cwt', seed: int=2025,
     n_estimators: int = 100, max_depth: int = 10,
-    seed: int=2025, evaluate: bool=True,
+    evaluate: bool=True, save: bool=False,
+    args: Optional[Namespace]=None,
     test_ratio: float = 0.2,
     verbose: int=1,
     n_jobs: int=-1
@@ -42,6 +41,10 @@ def rf_classifier_timefreq(
         Must be one of ['stft', 'cwt', 'wvd', 'pwvd']. \n
         See docstring of `nk.signal_timefrequency`
         for introduction of each method.
+
+    seed : int, optional, default=2025
+        Random seed used for train-test split
+        and training the random forest.
     
     n_estimators : int, optional, default=100
         The number of trees in the random forest.
@@ -49,14 +52,20 @@ def rf_classifier_timefreq(
     max_depth : int, optional, default=10
         The maximum depth of the trees in the random forest.
     
-    seed : int, optional, default=2025
-        Random seed used for train-test split
-        and training the random forest.
-    
     evaluate : bool, optional, default=True
         If true, the performance of trained classifier
         will be evaluated and printed on the test
         set.
+    
+    save : bool, optioanl, default=False
+        If true, the evaluation report
+        will be saved into the rf_results.txt
+        file.
+    
+    args : argparse.namespace, optional
+        Must be defined when save=True.
+        Used to record experiment
+        settings.
 
     test_ratio : float, optional, default=0.2
         The ratio of test set.
@@ -79,7 +88,7 @@ def rf_classifier_timefreq(
 
     ex_verbose = True if verbose > 1 else False
 
-    all_features = _extract_features_timefreq(
+    all_features = extract_features_timefreq(
         x, sfreq, timefreq_method, n_jobs, ex_verbose)
 
     X = np.array(all_features)
@@ -105,66 +114,30 @@ def rf_classifier_timefreq(
     if evaluate:
         if verbose > 0:
             print('Evaluating ...')
-        y_pred = rf.predict(X_test)
-        print(classification_report(y_test, y_pred))
+        evaluate_rf(X_test, y_test, rf, save, args)
 
     return rf
 
 
-def _extract_features_timefreq(
-    x: np.ndarray, sfreq: int,
-    timefreq_method: str, n_jobs: int,
-    verbose: bool
-) -> np.ndarray:
-    n_samples, n_channels, _ = x.shape
-    # store features from all channels
-    all_features = []
+def evaluate_rf(X_test : np.ndarray, y_test : np.ndarray,
+                rf : RandomForestClassifier, save : bool,
+                args: Optional[Namespace]=None):
+    y_pred = rf.predict(X_test)
+    report = classification_report(y_test, y_pred)
 
-    if n_jobs == -1:
-        n_jobs = os.cpu_count()
+    if save:
+        if args is None:
+            raise ValueError('args must be provided when save=True.')
+        # 40 dashes as a divider
+        separator = "=" * 40 + "\n"  
+        file_name = "rf_results.txt"
+        config_str = print_args(args, 'Settings', return_str=True)
 
-    args = [(i, x, n_channels, sfreq, timefreq_method, verbose)
-            for i in range(n_samples)]
-
-    with Pool(processes=n_jobs) as pool:
-        with tqdm(total=n_samples, desc="Processing samples") as pbar:
-            def update_progress(_):
-                pbar.update(1)
-            
-            # Use apply_async to handle the tasks asynchronously
-            results = []
-            for arg in args:
-                result = pool.apply_async(
-                    _process_sample, arg, callback=update_progress)
-                results.append(result)
-            
-            # Wait for all processes to finish and collect the results
-            all_features = [result.get() for result in results]
-
-    return np.array(all_features)
-
-def _process_sample(i: int, x: np.ndarray, n_channels: int,
-                   sfreq: int, timefreq_method: str, verbose: bool):
-    """
-    Process a single sample (patient) to extract its features.
-    """
-    if verbose:
-        print(f'Handling sample {i} ....')
-    sample_features = []
-    
-    for c in range(n_channels):
-        # Perform time-frequency decomposition
-        freqs, _, x_cwt = nk.signal_timefrequency(
-            x[i, c, :], sampling_rate=sfreq,
-            method=timefreq_method,
-            min_frequency=1., max_frequency=80.,
-            show=False
-        )
-        
-        # Extract summary statistics
-        features = cwt_summary_features(x_cwt, freqs, labels=False)
-        sample_features.append(features.flatten())
-
-    if verbose:
-        print(f'Finished feature extraction of sample {i}')
-    return np.concatenate(sample_features)
+        with open(file_name, 'a') as f:
+            f.write(separator)
+            f.write(config_str + "\n\n")
+            f.write(report)
+            f.write("\n")
+        print(f'Evaluation report saved to {file_name}.')
+    else:
+        print(report)

@@ -10,3 +10,5 @@ patient_summary.csv
 summary.txt
 .DS_Store
 try_*.py
+*_results.txt
+results.txt

@@ -10,6 +10,8 @@ from utils.preprocess import read_seizure_times
 from utils.tools import check_labels
 
 
+# TODO - add other modes of sample balancing (only downsampling now)
+
 def build_classification_samples(
         folder_path: str, output_file: Optional[str]=None,
         selected_channels: Optional[List[str]]=None,
@@ -144,7 +146,7 @@ def _extract_samples(
         seizure_times: List[Tuple[int, int]],
         selected_channels: Optional[List[str]]=None,
         sample_time: float=10.0, preictal_time: float=10.0,
-        n_negative: int=5,
+        n_negative: int=-1,
         safe_gap: float=300.0
     ) -> Tuple[np.ndarray, np.ndarray]:
     """
