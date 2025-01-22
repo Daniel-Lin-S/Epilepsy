@@ -2,6 +2,68 @@ import numpy as np
 from scipy.stats import skew, kurtosis
 from typing import Dict, Union
 import neurokit2 as nk
+import os
+from tqdm import tqdm
+from multiprocessing import Pool
+
+
+def extract_features_timefreq(
+    x: np.ndarray, sfreq: int,
+    timefreq_method: str, n_jobs: int,
+    verbose: bool
+) -> np.ndarray:
+    n_samples, n_channels, _ = x.shape
+    # store features from all channels
+    all_features = []
+
+    if n_jobs == -1:
+        n_jobs = os.cpu_count()
+
+    args = [(i, x, n_channels, sfreq, timefreq_method, verbose)
+            for i in range(n_samples)]
+
+    with Pool(processes=n_jobs) as pool:
+        with tqdm(total=n_samples, desc="Processing samples") as pbar:
+            def update_progress(_):
+                pbar.update(1)
+            
+            # Use apply_async to handle the tasks asynchronously
+            results = []
+            for arg in args:
+                result = pool.apply_async(
+                    _process_sample, arg, callback=update_progress)
+                results.append(result)
+            
+            # Wait for all processes to finish and collect the results
+            all_features = [result.get() for result in results]
+
+    return np.array(all_features)
+
+def _process_sample(i: int, x: np.ndarray, n_channels: int,
+                   sfreq: int, timefreq_method: str, verbose: bool):
+    """
+    Process a single sample (patient) to extract its features.
+    """
+    if verbose:
+        print(f'Handling sample {i} ....')
+    sample_features = []
+    
+    for c in range(n_channels):
+        # Perform time-frequency decomposition
+        freqs, _, x_cwt = nk.signal_timefrequency(
+            x[i, c, :], sampling_rate=sfreq,
+            method=timefreq_method,
+            min_frequency=1., max_frequency=80.,
+            show=False
+        )
+        
+        # Extract summary statistics
+        features = cwt_summary_features(x_cwt, freqs, labels=False)
+        sample_features.append(features.flatten())
+
+    if verbose:
+        print(f'Finished feature extraction of sample {i}')
+    return np.concatenate(sample_features)
 
 
 def cwt_summary_features(
