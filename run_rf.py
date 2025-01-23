@@ -77,7 +77,7 @@ if __name__ == '__main__':
         f'Number of time stamps {x.shape[2]}')
 
     sfreq = read_sampling_rate(os.path.join(args.data_folder, 'summary.txt'))
-    rf_classifier_timefreq(x[:10], y[:10], sfreq, save=True,
+    rf_classifier_timefreq(x, y, sfreq, save=True,
                            n_estimators=args.n_estimators,
                            max_depth=args.max_depth,
                            timefreq_method=args.timefreq_method,
