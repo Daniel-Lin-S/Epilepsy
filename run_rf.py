@@ -17,7 +17,7 @@ parser.add_argument('--data_folder', type=str, default='./dataset',
 # Drawing samples
 parser.add_argument('--sample_length', type=float, default=10.0,
                     help='Length of sample interval (in seconds)')
-parser.add_argument('--preictal_time', type=float, default=10.0,
+parser.add_argument('--preictal_time', type=float, default=20.0,
                     help='The time before seizure start (in seconds) to take the sample')
 parser.add_argument('--sample_mode', type=str, default='undersample',
                     help='The method used to balance two classes')

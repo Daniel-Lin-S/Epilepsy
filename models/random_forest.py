@@ -3,7 +3,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 from argparse import Namespace
-from typing import Optional
+from typing import Optional, List
 
 from feature_extraction import extract_features_timefreq
 from utils.tools import check_labels, print_args
@@ -18,11 +18,13 @@ def rf_classifier_timefreq(
     test_ratio: float = 0.2,
     verbose: int=1,
     n_jobs: int=-1,
+    num_experiments: int=5,
     **kwargs
-) -> RandomForestClassifier:
+) -> List[RandomForestClassifier]:
     """
     Build and train a Random Forest classifier on
-    features extracted using time-frequency decomposition.
+    features extracted using time-frequency decomposition. \n
+    Train-test separation included.
 
     Parameters
     ----------
@@ -79,14 +81,18 @@ def rf_classifier_timefreq(
     n_jobs : int, optional, default=-1
         Number of jobs to run in parallel. \n
         Default is -1, which means using all available cores.
+
+    num_experiments : int, optional, default=5
+        Number of times to repeat the experiment
+        using various seeds.
     
     kwargs : Any
         keyword arguments passed to sklearn.ensemble.RandomForestClassifier
     
     Returns
     -------
-    RandomForestClassifier
-        The trained random forest classifier.
+    List[RandomForestClassifier]
+        The trained random forest classifiers.
     """
     check_labels(y)
 
@@ -103,28 +109,35 @@ def rf_classifier_timefreq(
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_ratio, random_state=seed)
 
-    rf = RandomForestClassifier(
-        n_estimators=n_estimators, max_depth=max_depth,
-        random_state=seed, **kwargs)
+    rf_models = []
 
-    if verbose > 0:
-        print(f'Training random forest with {n_estimators} trees ...')
+    for i in range(num_experiments):
+        print(f'Iteration {i}')
+        rf = RandomForestClassifier(
+            n_estimators=n_estimators, max_depth=max_depth,
+            random_state=seed+i, **kwargs)
 
-    rf.fit(X_train, y_train)
-
-    if verbose > 0:
-        print('finished training.')
-
-    if evaluate:
         if verbose > 0:
-            print('Evaluating ...')
-        evaluate_rf(X_test, y_test, rf, save, args)
+            print(f'Training random forest with {n_estimators} trees ...')
 
-    return rf
+        rf.fit(X_train, y_train)
+
+        if verbose > 0:
+            print('finished training.')
+
+        if evaluate:
+            if verbose > 0:
+                print('Evaluating ...')
+            evaluate_rf(X_test, y_test, rf, save, i, args)
+        
+        rf_models.append(rf)
+
+    return rf_models
 
 
-def evaluate_rf(X_test : np.ndarray, y_test : np.ndarray,
-                rf : RandomForestClassifier, save : bool,
+def evaluate_rf(X_test: np.ndarray, y_test: np.ndarray,
+                rf: RandomForestClassifier, save: bool,
+                exp_id: int,
                 args: Optional[Namespace]=None):
     y_pred = rf.predict(X_test)
     # metrics based on confusion matrix
@@ -144,19 +157,24 @@ def evaluate_rf(X_test : np.ndarray, y_test : np.ndarray,
 
     full_report = f"{cm_str}\n\n{report}"
 
+    if exp_id == 0:
+        # 40 dashes as a divider
+        separator = "=" * 40 + "\n"
+        config_str = print_args(args, 'Settings', return_str=True)
+        full_report = separator + config_str + "\n\n" +full_report
+    else:
+        separator = f"-------- Iteration {exp_id} --------" + "\n"
+        full_report = separator + full_report
+
     if save:
         if args is None:
             raise ValueError('args must be provided when save=True.')
-        # 40 dashes as a divider
-        separator = "=" * 40 + "\n"  
+
         file_name = "rf_results.txt"
-        config_str = print_args(args, 'Settings', return_str=True)
 
         with open(file_name, 'a') as f:
-            f.write(separator)
-            f.write(config_str + "\n\n")
             f.write(full_report)
             f.write("\n")
         print(f'Evaluation report saved to {file_name}.')
     else:
-        print(report)
+        print(full_report)
