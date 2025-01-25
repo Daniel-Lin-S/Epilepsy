@@ -137,10 +137,10 @@ def evaluate_rf(X_test : np.ndarray, y_test : np.ndarray,
 
     # Format confusion matrix for better readability
     cm_str = "Confusion Matrix:\n"
-    cm_str += f"          {', '.join(map(str, class_labels))}\n"
+    cm_str += f"              {', '.join(map(str, class_labels))}\n"
     
     for i, row in enumerate(cm):
-        cm_str += f"Class {class_labels[i]}: {', '.join(map(str, row))}\n"
+        cm_str += f"True Label {class_labels[i]}: {', '.join(map(str, row))}\n"
 
     full_report = f"{cm_str}\n\n{report}"
 
