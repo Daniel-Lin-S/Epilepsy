@@ -187,3 +187,44 @@ def print_args(args: argparse.Namespace,
         return args_str
     else:
         print(args_str)
+
+def estimate_confusion_matrix(precision : str):
+    """
+    Estimate confusion matrix from the classification report.
+    
+    Parameters:
+    ----------
+    class_report : str
+        The classification report as string.
+    
+    Returns:
+    -------
+    pd.DataFrame
+        Estimated confusion matrix.
+    """
+    # Parse the classification report
+    report_dict = classification_report(y_true=[], y_pred=[], output_dict=True)
+    
+    # Initialize the confusion matrix
+    cm = []
+
+    # Iterate through each class and estimate the confusion matrix
+    for class_name, metrics in report_dict.items():
+        if class_name not in ['accuracy', 'macro avg', 'weighted avg']:  # Ignore avg fields
+            precision = metrics['precision']
+            recall = metrics['recall']
+            support = metrics['support']
+
+            # Estimate TP (True Positive), FN (False Negative), FP (False Positive), TN (True Negative)
+            tp = precision * recall * support
+            fn = support - tp
+            fp = (precision * support) - tp
+            tn = support - fn - fp
+
+            # Add the values to confusion matrix (order: [TP, FP], [FN, TN])
+            cm.append([tp, fp])
+            cm.append([fn, tn])
+    
+    # Create confusion matrix DataFrame for better visualization
+    confusion_matrix_df = pd.DataFrame(cm, columns=['Pred Positives', 'Pred Negatives'], index=['Class 0', 'Class 1'])
+    return confusion_matrix_df

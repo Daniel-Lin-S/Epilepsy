@@ -17,7 +17,7 @@ parser.add_argument('--data_folder', type=str, default='./dataset',
 # Drawing samples
 parser.add_argument('--sample_length', type=float, default=10.0,
                     help='Length of sample interval (in seconds)')
-parser.add_argument('--preictal_time', type=float, default=5.0,
+parser.add_argument('--preictal_time', type=float, default=10.0,
                     help='The time before seizure start (in seconds) to take the sample')
 parser.add_argument('--sample_mode', type=str, default='undersample',
                     help='The method used to balance two classes')
@@ -35,6 +35,8 @@ parser.add_argument('--n_estimators', type=int, default=100,
                     help='The number of trees in the random forest.')
 parser.add_argument('--max_depth', type=int, default=10,
                     help='The maximum depth of the trees in the random forest.')
+parser.add_argument('--positive_weight', type=float, default=1.0,
+                    help='The weight given to class 1 (seizure).')
 
 args = parser.parse_args()
 
@@ -46,7 +48,7 @@ if __name__ == '__main__':
     channel_path = os.path.join(args.data_folder, 'selected_channels.pkl')
 
     print('------------ Starting Random Forest Experiment --------------')
-    print_args(args, description='Settings')
+    print_args(args, description='Settings', return_str=False)
     
     # create samples
     if not os.path.exists(sample_path):
@@ -81,6 +83,6 @@ if __name__ == '__main__':
                            n_estimators=args.n_estimators,
                            max_depth=args.max_depth,
                            timefreq_method=args.timefreq_method,
-                           args=args)
+                           args=args, class_weight={0: 1, 1: args.positive_weight})
 
     print("-" * 40)
