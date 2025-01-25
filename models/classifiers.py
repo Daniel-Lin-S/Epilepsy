@@ -1,28 +1,29 @@
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 from argparse import Namespace
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from feature_extraction import extract_features_timefreq
-from utils.tools import check_labels, print_args
+from utils.tools import check_labels, print_args, print_dict
 
 
-def rf_classifier_timefreq(
+def classifier_timefreq(
     x: np.ndarray, y: np.ndarray, sfreq: float,
+    model_params: Dict[str, dict], model_name: str,
     timefreq_method: str='cwt', seed: int=2025,
-    n_estimators: int = 100, max_depth: int = 10,
     evaluate: bool=True, save: bool=False,
     args: Optional[Namespace]=None,
     test_ratio: float = 0.2,
     verbose: int=1,
     n_jobs: int=-1,
     num_experiments: int=5,
-    **kwargs
+    result_file: str='result.txt'
 ) -> List[RandomForestClassifier]:
     """
-    Build and train a Random Forest classifier on
+    Build and train a classifier on
     features extracted using time-frequency decomposition. \n
     Train-test separation included.
 
@@ -38,6 +39,15 @@ def rf_classifier_timefreq(
     
     sfreq : float
         The sampling frequency of the signals (Hz).
+
+    model_params : Dict[str, dict]
+        The hyper-parameters of each classification model.
+    
+    model_name : str
+        The classification model used. \n
+        Options: 
+        - 'rf' : random forest
+        - 'svm' : Support Vector Machine (CSVM)
     
     timefreq_method : str
         The method use for time-frequency decomposition. \n
@@ -48,12 +58,6 @@ def rf_classifier_timefreq(
     seed : int, optional, default=2025
         Random seed used for train-test split
         and training the random forest.
-    
-    n_estimators : int, optional, default=100
-        The number of trees in the random forest.
-    
-    max_depth : int, optional, default=10
-        The maximum depth of the trees in the random forest.
     
     evaluate : bool, optional, default=True
         If true, the performance of trained classifier
@@ -86,13 +90,15 @@ def rf_classifier_timefreq(
         Number of times to repeat the experiment
         using various seeds.
     
-    kwargs : Any
-        keyword arguments passed to sklearn.ensemble.RandomForestClassifier
+    result_file : str, optional
+        The name of the file in which results
+        should be saved. \n
+        Only valid if save=True
     
     Returns
     -------
-    List[RandomForestClassifier]
-        The trained random forest classifiers.
+    list
+        List of trained classifiers.
     """
     check_labels(y)
 
@@ -109,37 +115,96 @@ def rf_classifier_timefreq(
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_ratio, random_state=seed)
 
-    rf_models = []
+    models = []
+
+    statis_models = ['svm']
+    if num_experiments > 1 and model_name in statis_models:
+        num_experiments = 1
+        print('CSVM have no randomness, '
+                'setting number of experiments to 1.')
 
     for i in range(num_experiments):
         print(f'Iteration {i}')
-        rf = RandomForestClassifier(
-            n_estimators=n_estimators, max_depth=max_depth,
-            random_state=seed+i, **kwargs)
 
-        if verbose > 0:
-            print(f'Training random forest with {n_estimators} trees ...')
+        if model_name == 'rf':
+            n_estimators = model_params['rf']['n_estimators']
+            model = RandomForestClassifier(
+                n_estimators=n_estimators,
+                random_state=seed+i,
+                **model_params['rf'].get('kwargs', {}))
 
-        rf.fit(X_train, y_train)
+            if verbose > 0:
+                print(
+                    "Training random forest with "
+                    f"{n_estimators} trees ...")
+        elif model_name == 'svm':
+            kernel = model_params['svm']['kernel']
+            model = SVC(
+                C=model_params['svm']['C'],
+                kernel=kernel,
+                random_state=seed+i,
+                **model_params['svm'].get('kwargs', {})
+            )
 
-        if verbose > 0:
-            print('finished training.')
+            if verbose > 0:
+                print(
+                    "Training CSVM with "
+                    f"{kernel} kernel ...")
+        else:
+            raise ValueError(
+                f'Unsupport model_name {model_name}'
+            )
+
+        model.fit(X_train, y_train)
 
         if evaluate:
-            if verbose > 0:
-                print('Evaluating ...')
-            evaluate_rf(X_test, y_test, rf, save, i, args)
+            y_pred = model.predict(X_test)
+            evaluate_classifier(
+                y_test, y_pred, save,
+                model_params=model_params[model_name],
+                exp_id=i,
+                file_name=result_file,
+                args=args)
         
-        rf_models.append(rf)
+        models.append(model)
 
-    return rf_models
+    return models
 
 
-def evaluate_rf(X_test: np.ndarray, y_test: np.ndarray,
-                rf: RandomForestClassifier, save: bool,
-                exp_id: int,
-                args: Optional[Namespace]=None):
-    y_pred = rf.predict(X_test)
+def evaluate_classifier(
+        y_test: np.ndarray,
+        y_pred: np.ndarray, save: bool,
+        model_params : dict,
+        exp_id: int=0,
+        file_name : str='result.txt',
+        args: Optional[Namespace]=None):
+    """
+    Evaluate classification result based on 
+    confusion matrix, and optionally save the results
+    to a text file.
+
+    Parameters
+    ----------
+    X_test, y_test : np.ndarray
+        the test set and labels
+    y_pred : np.ndarray
+        The predicted labels
+    save : bool
+        If true, the results
+        will be saved. Otherwise,
+        all printed.
+    exp_id : int, optional, default=0
+        Used to store multiple repeititions
+        of an experiment with the same
+        settings. Use 0 to include header.
+    file_name : str, optional
+        The name of the file in which results
+        should be saved. 
+    args : Namespace, optional
+        The experiment settings. \n
+        If provided, will be added
+        at the beginning.
+    """
     # metrics based on confusion matrix
     report = classification_report(y_test, y_pred)
 
@@ -159,19 +224,20 @@ def evaluate_rf(X_test: np.ndarray, y_test: np.ndarray,
 
     if exp_id == 0:
         # 40 dashes as a divider
-        separator = "=" * 40 + "\n"
-        config_str = print_args(args, 'Settings', return_str=True)
-        full_report = separator + config_str + "\n\n" +full_report
+        header = "=" * 40 + "\n"
+        if args is not None:
+            config_str = print_args(args, 'Settings', return_str=True)
+            header = header + config_str + "\n"
+        # Model Hyperparameters
+        params_str = print_dict(model_params)
+        header = header + 'Classifier hyper-parameters: ' + params_str + "\n"
+        header = header + "\n"
+        full_report = header + full_report
     else:
         separator = f"-------- Iteration {exp_id} --------" + "\n"
         full_report = separator + full_report
 
     if save:
-        if args is None:
-            raise ValueError('args must be provided when save=True.')
-
-        file_name = "rf_results.txt"
-
         with open(file_name, 'a') as f:
             f.write(full_report)
             f.write("\n")

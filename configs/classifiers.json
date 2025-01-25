@@ -1,0 +1,13 @@
+{
+    "rf": {
+      "n_estimators": 100,
+      "kwargs": {
+        "max_depth": 10
+      }
+    },
+    "svm": {
+      "C": 1.0,
+      "kernel": "rbf",
+      "kwargs": {}
+    }
+  }

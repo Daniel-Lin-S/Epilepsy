@@ -1,8 +1,9 @@
 import numpy as np
-from typing import Union, List, Tuple, Optional
+from typing import Union, List, Tuple, Optional, Dict
 from mne.io.edf.edf import RawEDF
 import pickle
 import argparse
+import json
 
 
 def check_labels(y: Union[np.ndarray, List[int]]):
@@ -188,43 +189,55 @@ def print_args(args: argparse.Namespace,
     else:
         print(args_str)
 
-def estimate_confusion_matrix(precision : str):
+
+def flatten_dict(d: dict) -> dict:
+    items = []
+    for k, v in d.items():
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v).items())
+        else:
+            items.append((k, v))
+
+    return dict(items)
+
+
+def print_dict(
+    d: dict, return_str: bool=True
+) -> Union[str, None]:
     """
-    Estimate confusion matrix from the classification report.
-    
+    Turn a dictionary into a string.
+    The dictionary can be nested.
+
+    d : dict
+        The dictionary being processed
+    return_str : bool
+        If true, return the formatted dict.
+        Otherwise, printed.
+    """
+    flattened_dict = flatten_dict(d)
+    dict_str = ', '.join(
+        [f"{k} : {v}" for k, v in flattened_dict.items()])
+    if return_str:
+        return dict_str
+    else:
+        print(dict_str)
+
+
+def read_config(config_file: str) -> Dict:
+    """
+    Read the JSON configuration file and
+    return the parameters as a dictionary.
+
     Parameters:
     ----------
-    class_report : str
-        The classification report as string.
-    
+    config_file : str
+        Path to the configuration JSON file.
+
     Returns:
     -------
-    pd.DataFrame
-        Estimated confusion matrix.
+    dict
+        Dictionary containing model parameters for each classifier.
     """
-    # Parse the classification report
-    report_dict = classification_report(y_true=[], y_pred=[], output_dict=True)
-    
-    # Initialize the confusion matrix
-    cm = []
-
-    # Iterate through each class and estimate the confusion matrix
-    for class_name, metrics in report_dict.items():
-        if class_name not in ['accuracy', 'macro avg', 'weighted avg']:  # Ignore avg fields
-            precision = metrics['precision']
-            recall = metrics['recall']
-            support = metrics['support']
-
-            # Estimate TP (True Positive), FN (False Negative), FP (False Positive), TN (True Negative)
-            tp = precision * recall * support
-            fn = support - tp
-            fp = (precision * support) - tp
-            tn = support - fn - fp
-
-            # Add the values to confusion matrix (order: [TP, FP], [FN, TN])
-            cm.append([tp, fp])
-            cm.append([fn, tn])
-    
-    # Create confusion matrix DataFrame for better visualization
-    confusion_matrix_df = pd.DataFrame(cm, columns=['Pred Positives', 'Pred Negatives'], index=['Class 0', 'Class 1'])
-    return confusion_matrix_df
+    with open(config_file, 'r') as f:
+        config = json.load(f)
+    return config
