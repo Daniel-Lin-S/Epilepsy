@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, confusion_matrix
 from argparse import Namespace
 from typing import Optional
 
@@ -17,7 +17,8 @@ def rf_classifier_timefreq(
     args: Optional[Namespace]=None,
     test_ratio: float = 0.2,
     verbose: int=1,
-    n_jobs: int=-1
+    n_jobs: int=-1,
+    **kwargs
 ) -> RandomForestClassifier:
     """
     Build and train a Random Forest classifier on
@@ -79,6 +80,9 @@ def rf_classifier_timefreq(
         Number of jobs to run in parallel. \n
         Default is -1, which means using all available cores.
     
+    kwargs : Any
+        keyword arguments passed to sklearn.ensemble.RandomForestClassifier
+    
     Returns
     -------
     RandomForestClassifier
@@ -101,7 +105,7 @@ def rf_classifier_timefreq(
 
     rf = RandomForestClassifier(
         n_estimators=n_estimators, max_depth=max_depth,
-        random_state=seed)
+        random_state=seed, **kwargs)
 
     if verbose > 0:
         print(f'Training random forest with {n_estimators} trees ...')
@@ -123,7 +127,22 @@ def evaluate_rf(X_test : np.ndarray, y_test : np.ndarray,
                 rf : RandomForestClassifier, save : bool,
                 args: Optional[Namespace]=None):
     y_pred = rf.predict(X_test)
+    # metrics based on confusion matrix
     report = classification_report(y_test, y_pred)
+
+    # confusion matrix
+    cm = confusion_matrix(y_test, y_pred)
+
+    class_labels = np.unique(y_test)
+
+    # Format confusion matrix for better readability
+    cm_str = "Confusion Matrix:\n"
+    cm_str += f"          {', '.join(map(str, class_labels))}\n"
+    
+    for i, row in enumerate(cm):
+        cm_str += f"Class {class_labels[i]}: {', '.join(map(str, row))}\n"
+
+    full_report = f"{cm_str}\n\n{report}"
 
     if save:
         if args is None:
@@ -136,7 +155,7 @@ def evaluate_rf(X_test : np.ndarray, y_test : np.ndarray,
         with open(file_name, 'a') as f:
             f.write(separator)
             f.write(config_str + "\n\n")
-            f.write(report)
+            f.write(full_report)
             f.write("\n")
         print(f'Evaluation report saved to {file_name}.')
     else:
