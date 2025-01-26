@@ -2,7 +2,9 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import (
+    classification_report, confusion_matrix, accuracy_score, recall_score
+)
 from argparse import Namespace
 from typing import Optional, List, Dict
 
@@ -122,6 +124,10 @@ def classifier_timefreq(
         num_experiments = 1
         print('CSVM have no randomness, '
                 'setting number of experiments to 1.')
+    
+    if evaluate:
+        accuracies = []
+        recalls = []
 
     for i in range(num_experiments):
         print(f'Iteration {i}')
@@ -159,6 +165,8 @@ def classifier_timefreq(
 
         if evaluate:
             y_pred = model.predict(X_test)
+            accuracies.append(accuracy_score(y_test, y_pred))
+            recalls.append(recall_score(y_test, y_pred))
             evaluate_classifier(
                 y_test, y_pred, save,
                 model_params=model_params[model_name],
@@ -167,6 +175,17 @@ def classifier_timefreq(
                 args=args)
         
         models.append(model)
+    
+    if evaluate and num_experiments > 1:
+        separator = f"-------- Aggregate --------" + "\n"
+        metrics = (
+            f"Accuracy : {np.mean(accuracies)} ± {np.std(accuracies)}"
+            f"; Recall : {np.mean(recalls)} ± {np.std(recalls)}"
+        )
+        with open(result_file, 'a') as f:
+            f.write(separator + metrics)
+            f.write("\n")
+        print(f'Summary metrics saved to {result_file}.')
 
     return models
 
@@ -177,7 +196,8 @@ def evaluate_classifier(
         model_params : dict,
         exp_id: int=0,
         file_name : str='result.txt',
-        args: Optional[Namespace]=None):
+        args: Optional[Namespace]=None
+    ) -> None:
     """
     Evaluate classification result based on 
     confusion matrix, and optionally save the results
