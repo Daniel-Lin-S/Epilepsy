@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Define the possible values for sample_length and preictal_time
+model_name=svm   # rf
 sample_lengths=(5.0 10.0 20.0)
-preictal_times=(10.0 20.0 30.0 40.0 60.0)
+preictal_times=(10.0 20.0 30.0 40.0 50.0 60.0 70.0 80.0 90.0 120.0)
 
 # Loop through all combinations
 for sample_length in "${sample_lengths[@]}"; do
@@ -11,6 +11,6 @@ for sample_length in "${sample_lengths[@]}"; do
         --sample_length $sample_length \
         --preictal_time $preictal_time \
         --select_channels \
-        --model_name rf
+        --model_name $model_name
     done
 done

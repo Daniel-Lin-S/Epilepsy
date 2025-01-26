@@ -241,3 +241,29 @@ def read_config(config_file: str) -> Dict:
     with open(config_file, 'r') as f:
         config = json.load(f)
     return config
+
+
+def confusion_matrix_to_str(cm: np.ndarray, class_labels: np.ndarray):
+    """
+    Format a confusion matrix to str
+    
+    Parameters
+    ----------
+    cm : np.ndarray
+        The confusion matrix
+    class_labels : np.ndarray
+        The corresponding labels
+    """
+    if class_labels.ndim != 1:
+        raise TypeError('class_labels must be a 1-dimensional array')
+    elif class_labels.shape[0] != cm.shape[0]:
+        raise TypeError(
+            'The length of class_labels must be consistent with cm'
+        )
+
+    cm_str = "Confusion Matrix:\n"
+    cm_str += f"              {', '.join(map(str, class_labels))}\n"
+    
+    for i, row in enumerate(cm):
+        cm_str += f"True Label {class_labels[i]}: {', '.join(map(str, row))}\n"
+    return cm_str

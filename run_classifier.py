@@ -34,6 +34,9 @@ parser.add_argument('--timefreq_method', type=str, default='cwt',
                     help='The method use for time-frequency decomposition. '
                     "Must be one of ['stft', 'cwt', 'wvd', 'pwvd'], "
                     "see docstring of `nk.signal_timefrequency`.")
+parser.add_argument('--n_features', type=int, default=-1,
+                    help='The number of features to keep in ICA. '
+                    'Set to negative for no dimension reduction')
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -81,6 +84,7 @@ if __name__ == '__main__':
         x, y, sfreq,
         model_params=model_params, model_name=args.model_name,
         save=True, timefreq_method=args.timefreq_method,
+        n_features=args.n_features,
         args=args, result_file=f'{args.model_name}_results.txt')
 
     print("-" * 40)
