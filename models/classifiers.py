@@ -3,7 +3,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
-    classification_report, confusion_matrix, accuracy_score, recall_score
+    classification_report, confusion_matrix, precision_recall_fscore_support,
+    accuracy_score
 )
 from argparse import Namespace
 from typing import Optional, List, Dict
@@ -128,6 +129,8 @@ def classifier_timefreq(
     if evaluate:
         accuracies = []
         recalls = []
+        fscores = []
+        precisions = []
 
     for i in range(num_experiments):
         print(f'Iteration {i}')
@@ -165,8 +168,13 @@ def classifier_timefreq(
 
         if evaluate:
             y_pred = model.predict(X_test)
+            precision, recall, fscore, _ = precision_recall_fscore_support(
+                y_test, y_pred, average='binary'
+            )
             accuracies.append(accuracy_score(y_test, y_pred))
-            recalls.append(recall_score(y_test, y_pred))
+            recalls.append(recall)
+            precisions.append(precision)
+            fscores.append(fscore)
             evaluate_classifier(
                 y_test, y_pred, save,
                 model_params=model_params[model_name],
@@ -180,7 +188,9 @@ def classifier_timefreq(
         separator = f"-------- Aggregate --------" + "\n"
         metrics = (
             f"Accuracy : {np.mean(accuracies)} ± {np.std(accuracies)}"
-            f"; Recall : {np.mean(recalls)} ± {np.std(recalls)}"
+            f"; Sensitivity (recall) : {np.mean(recalls)} ± {np.std(recalls)}"
+            f"; Precision : {np.mean(precisions)} ± {np.std(precisions)}"
+            f"; F-score : {np.mean(fscores)} ± {np.std(fscores)}"
         )
         with open(result_file, 'a') as f:
             f.write(separator + metrics)
