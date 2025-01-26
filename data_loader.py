@@ -205,8 +205,8 @@ def _extract_samples(
 
     # Extract positive samples
     for start_idx, _ in seizure_times:
-        pre_ictal_start = int(start_idx) - int(preictal_time * sfreq)
-        pre_ictal_end = pre_ictal_start + sample_length
+        pre_ictal_end = int(start_idx) - int(preictal_time * sfreq)
+        pre_ictal_start = pre_ictal_end - sample_length
 
         if pre_ictal_start >= 0:
             if selected_channels:
