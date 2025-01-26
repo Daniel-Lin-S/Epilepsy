@@ -9,17 +9,20 @@ from sklearn.metrics import (
 )
 from sklearn.decomposition import FastICA
 from argparse import Namespace
-from typing import Optional, List, Dict
+from typing import Optional, Dict
+import os
+import h5py
 
 from feature_extraction import extract_features_timefreq
 from utils.tools import check_labels, print_args, print_dict, confusion_matrix_to_str
+from data_loader import read_samples
 
 
 def classifier_timefreq(
     x: np.ndarray, y: np.ndarray, sfreq: float,
-    model_params: Dict[str, dict], model_name: str,
-    timefreq_method: str='cwt', seed: int=2025,
-    n_features: int=-1,
+    model_params: Dict[str, dict],
+    seed: int=2025,
+    store_features: bool=False,
     evaluate: bool=True, save: bool=False,
     args: Optional[Namespace]=None,
     verbose: int=1,
@@ -49,26 +52,13 @@ def classifier_timefreq(
     model_params : Dict[str, dict]
         The hyper-parameters of each classification model.
 
-    model_name : str
-        The classification model used. \n
-        Options: 
-        - 'rf' : random forest
-        - 'svm' : Support Vector Machine (CSVM)
-
-    timefreq_method : str
-        The method use for time-frequency decomposition. \n
-        Must be one of ['stft', 'cwt', 'wvd', 'pwvd']. \n
-        See docstring of `nk.signal_timefrequency`
-        for introduction of each method.
-
     seed : int, optional, default=2025
         Random seed used for train-test split
         and training the random forest.
-
-    n_features : int, optioanl, default=-1
-        If negative, all extracted features used. \n
-        Otherwise, use independent component analysis (ICA)
-        to reduce the dimension to n_features.
+    
+    store_features : bool, optional
+        If true, the features will be stored
+        as h5 file for reuse.
 
     evaluate : bool, optional, default=True
         If true, the performance of trained classifier
@@ -83,7 +73,16 @@ def classifier_timefreq(
     args : argparse.namespace, optional
         Must be defined when save=True.
         Used to record experiment
-        settings.
+        settings. Must contain the following:
+        - 'n_features' (int) : Number of features to keep in
+        ICA to reduce the dimension. If negative, all features used.
+        - 'sample_length' (float): Length of sample interval (in seconds)
+        - 'preictal_time' (float): The time before seizure start
+        (in seconds) to take the sample
+        - 'timefreq_method' (str) : The method use for time-frequency decomposition.
+        Must be one of ['stft', 'cwt', 'wvd', 'pwvd'].
+        - 'model_name' (str) : The classification model used. \n
+        Options: 'rf' : random forest; 'svm' : Support Vector Machine (CSVM)
 
     verbose : int, optional, default=1
         Level of stage-wise reports.
@@ -114,23 +113,42 @@ def classifier_timefreq(
 
     ex_verbose = True if verbose > 1 else False
 
-    all_features = extract_features_timefreq(
-        x, sfreq, timefreq_method, n_jobs, ex_verbose)
+    if store_features:
+        feature_folder = './samples/timefreq/'
+        feature_file = (f'len[{args.sample_length}]-start[{args.preictal_time}]'
+                        f'-timefreq[{args.timefreq_method}].h5')
+        
+        feature_path = os.path.join(feature_folder, feature_file)
+
+        if not os.path.exists(feature_folder):
+            os.makedirs(feature_folder)
+
+        if os.path.exists(feature_path):
+            all_features, y = read_samples(feature_path)
+        else:
+            all_features = extract_features_timefreq(
+                x, sfreq, args.timefreq_method, n_jobs, ex_verbose)
+            with h5py.File(feature_path, 'w') as f:
+                f.create_dataset('x', data=all_features)
+                f.create_dataset('y', data=y)
+    else:
+        all_features = extract_features_timefreq(
+                x, sfreq, args.timefreq_method, n_jobs, ex_verbose)
     
     dim_total = all_features.shape[1]
 
     if verbose > 0:
         print(f'Extracted {dim_total} features')
 
-    if n_features <= 0:
+    if args.n_features <= 0:
         X = np.array(all_features)
-    elif n_features <= dim_total:
-        print(f'Reducing dimension to {n_features} ...')
-        ica = FastICA(n_components=n_features)
+    elif args.n_features <= dim_total:
+        print(f'Reducing dimension to {args.n_features} ...')
+        ica = FastICA(n_components=args.n_features)
         X = ica.fit_transform(all_features)
     else:
         raise ValueError(
-            f'n_features ({n_features}) cannot exceed total '
+            f'n_features ({args.n_features}) cannot exceed total '
             f'number of features: {dim_total}.'
         )
 
@@ -149,7 +167,7 @@ def classifier_timefreq(
         y_train, y_test = y[train_index], y[test_index]
         print(f'Fold {i}')
 
-        if model_name == 'rf':
+        if args.model_name == 'rf':
             try:
                 n_estimators = model_params['rf']['n_estimators']
             except KeyError:
@@ -165,7 +183,7 @@ def classifier_timefreq(
                 print(
                     "Training random forest with "
                     f"{n_estimators} trees ...")
-        elif model_name == 'svm':
+        elif args.model_name == 'svm':
             try:
                 kernel = model_params['svm']['kernel']
                 C = model_params['svm']['C']
@@ -184,7 +202,7 @@ def classifier_timefreq(
                 print(
                     "Training CSVM with "
                     f"{kernel} kernel and C={C} ...")
-        elif model_name == 'logreg':  # Add case for Logistic Regression
+        elif args.model_name == 'logreg':  # Add case for Logistic Regression
             try:
                 penalty = model_params['logreg']['penalty']
             except KeyError:
@@ -203,7 +221,7 @@ def classifier_timefreq(
                     f"{penalty} penalty ...")
         else:
             raise ValueError(
-                f'Unsupport model_name {model_name}'
+                f'Unsupport model_name {args.model_name}'
             )
     
         model.fit(X_train, y_train)
@@ -220,7 +238,7 @@ def classifier_timefreq(
             if detailed_log or i == 0:
                 evaluate_classifier(
                     y_test, y_pred, save,
-                    model_params=model_params[model_name],
+                    model_params=model_params[args.model_name],
                     exp_id=i,
                     file_name=result_file,
                     args=args,

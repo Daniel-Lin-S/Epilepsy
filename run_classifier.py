@@ -16,7 +16,7 @@ parser.add_argument('--data_folder', type=str, default='./dataset',
                     help='The folder in which all data are stored')
 parser.add_argument('--config_file', type=str, default='configs/classifiers.json',
                     help='Configurations for classifier')
-parser.add_argument('--model_name', type=str, default='logreg',
+parser.add_argument('--model_name', type=str, default='rf',
                     help='The classification model used.'
                     'choices: rf, logreg, svm')
 
@@ -27,6 +27,8 @@ parser.add_argument('--preictal_time', type=float, default=20.0,
                     help='The time before seizure start (in seconds) to take the sample')
 parser.add_argument('--sample_mode', type=str, default='undersample',
                     help='The method used to balance two classes')
+parser.add_argument('--store_features', type=bool, default=True,
+                    help='If true, save the time-frequency features')
 
 # Feature selection and extraction
 parser.add_argument('--select_channels', action='store_true',
@@ -83,9 +85,8 @@ if __name__ == '__main__':
     model_params = read_config(args.config_file)
     classifier_timefreq(
         x, y, sfreq,
-        model_params=model_params, model_name=args.model_name,
-        save=True, timefreq_method=args.timefreq_method,
-        n_features=args.n_features,
+        model_params=model_params,
+        save=True, store_features=args.store_features,
         args=args, result_file=f'{args.model_name}_results.txt')
 
     print("-" * 40)

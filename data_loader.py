@@ -217,7 +217,7 @@ def _extract_samples(
         else:
             raise Exception(
                 'Not enough length before ictal stage. '
-                f'required length: ({preictal_time} + {sample_length}) s'
+                f'required length: ({preictal_time} + {sample_time}) s'
                 f', actual length {start_idx / sfreq} s. \n'
                 'Please reduce preictal_time or sample_length.'
             )

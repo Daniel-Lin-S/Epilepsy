@@ -13,7 +13,7 @@ parser.add_argument('--sample_times', type=float, nargs='+', default=[5.0, 10.0,
                     help="List of sample times / length of samples (in seconds). "
                     "Default: [5.0, 10.0, 20.0]")
 parser.add_argument('--preictal_times', type=float, nargs='+',
-                    default=[10.0, 20.0, 30.0, 40.0, 60.0],
+                    default=[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0],
                     help="List of intervals between seizure time and sample (in seconds). "
                     "Default: [10.0, 20.0, 30.0, 40.0, 60.0]")
 parser.add_argument('--n_negative', type=int, default=-1, 
