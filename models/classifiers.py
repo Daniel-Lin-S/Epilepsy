@@ -1,6 +1,7 @@
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import (
     classification_report, confusion_matrix, precision_recall_fscore_support,
@@ -157,7 +158,7 @@ def classifier_timefreq(
                     "in the configurations for rf")
             model = RandomForestClassifier(
                 n_estimators=n_estimators,
-                random_state=seed+i,
+                random_state=seed,
                 **model_params['rf'].get('kwargs', {}))
 
             if verbose > 0:
@@ -175,7 +176,7 @@ def classifier_timefreq(
             model = SVC(
                 C=C,
                 kernel=kernel,
-                random_state=seed+i,
+                random_state=seed,
                 **model_params['svm'].get('kwargs', {})
             )
 
@@ -183,6 +184,23 @@ def classifier_timefreq(
                 print(
                     "Training CSVM with "
                     f"{kernel} kernel and C={C} ...")
+        elif model_name == 'logreg':  # Add case for Logistic Regression
+            try:
+                penalty = model_params['logreg']['penalty']
+            except KeyError:
+                raise KeyError(
+                    "'C' must be defined "
+                    "in the configurations for logistic regression")
+            model = LogisticRegression(
+                penalty=penalty,
+                random_state=seed,
+                **model_params['logreg'].get('kwargs', {})
+            )
+
+            if verbose > 0:
+                print(
+                    "Training Logistic Regression with "
+                    f"{penalty} penalty ...")
         else:
             raise ValueError(
                 f'Unsupport model_name {model_name}'

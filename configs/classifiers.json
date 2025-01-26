@@ -9,5 +9,11 @@
       "C": 1.0,
       "kernel": "rbf",
       "kwargs": {}
+    },
+    "logreg": {
+      "penalty": "l1",
+      "kwargs": {
+        "solver": "liblinear"
+      }
     }
   }

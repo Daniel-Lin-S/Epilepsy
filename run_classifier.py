@@ -16,8 +16,9 @@ parser.add_argument('--data_folder', type=str, default='./dataset',
                     help='The folder in which all data are stored')
 parser.add_argument('--config_file', type=str, default='configs/classifiers.json',
                     help='Configurations for classifier')
-parser.add_argument('--model_name', type=str, default='rf',
-                    help='The classification model used.')
+parser.add_argument('--model_name', type=str, default='logreg',
+                    help='The classification model used.'
+                    'choices: rf, logreg, svm')
 
 # Drawing samples
 parser.add_argument('--sample_length', type=float, default=10.0,
