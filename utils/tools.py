@@ -4,6 +4,7 @@ from mne.io.edf.edf import RawEDF
 import pickle
 import argparse
 import json
+import pandas as pd
 
 
 def check_labels(y: Union[np.ndarray, List[int]]):
@@ -267,3 +268,15 @@ def confusion_matrix_to_str(cm: np.ndarray, class_labels: np.ndarray):
     for i, row in enumerate(cm):
         cm_str += f"True Label {class_labels[i]}: {', '.join(map(str, row))}\n"
     return cm_str
+
+
+def save_to_csv(data: dict, file_path: str):
+    """
+    Append a single data to csv file. \n
+    Create the file if not exist.
+    """
+    df = pd.DataFrame([data])
+
+    header = not pd.io.common.file_exists(file_path)
+
+    df.to_csv(file_path, mode='a', header=header, index=False)

@@ -3,7 +3,9 @@ from models.classifiers import classifier_timefreq
 import argparse
 import os
 
-from utils.tools import load_set_from_file, save_set_to_file, print_args, read_config
+from utils.tools import (
+    load_set_from_file, save_set_to_file, print_args, read_config
+)
 from utils.preprocess import read_sampling_rate
 from utils.channel_selection import find_significant_channels
 from data_loader import build_classification_samples
@@ -28,7 +30,7 @@ parser.add_argument('--preictal_time', type=float, default=20.0,
 parser.add_argument('--sample_mode', type=str, default='undersample',
                     help='The method used to balance two classes')
 parser.add_argument('--store_features', type=bool, default=True,
-                    help='If true, save the time-frequency features')
+                    help='If true, save the time-frequency features for easier future process')
 
 # Feature selection and extraction
 parser.add_argument('--select_channels', action='store_true',
@@ -85,8 +87,6 @@ if __name__ == '__main__':
     model_params = read_config(args.config_file)
     classifier_timefreq(
         x, y, sfreq,
-        model_params=model_params,
-        save=True, store_features=args.store_features,
-        args=args, result_file=f'{args.model_name}_results.txt')
+        model_params=model_params, args=args)
 
     print("-" * 40)

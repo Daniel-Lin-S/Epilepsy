@@ -14,27 +14,30 @@ import os
 import h5py
 
 from feature_extraction import extract_features_timefreq
-from utils.tools import check_labels, print_args, print_dict, confusion_matrix_to_str
+from utils.tools import (
+    check_labels, print_args, print_dict, confusion_matrix_to_str,
+    save_to_csv
+)
 from data_loader import read_samples
 
 
 def classifier_timefreq(
     x: np.ndarray, y: np.ndarray, sfreq: float,
     model_params: Dict[str, dict],
+    args: Namespace,
     seed: int=2025,
-    store_features: bool=False,
-    evaluate: bool=True, save: bool=False,
-    args: Optional[Namespace]=None,
+    evaluate: bool=True,
     verbose: int=1,
     n_jobs: int=-1,
     n_folds: int=5,
-    result_file: str='result.txt',
-    detailed_log: bool=False
+    save_confusion: bool=False
 ) -> list:
     """
     Build and train a classifier on
     features extracted using time-frequency decomposition. \n
-    Train-test separation included, using K-Fold validation.
+    Train-test separation included, using K-Fold validation. \n
+    All metrics will be saved to classifier_results.csv
+    if evaluate=True (by default).
 
     Parameters
     ----------
@@ -50,30 +53,18 @@ def classifier_timefreq(
         The sampling frequency of the signals (Hz).
 
     model_params : Dict[str, dict]
-        The hyper-parameters of each classification model.
-
-    seed : int, optional, default=2025
-        Random seed used for train-test split
-        and training the random forest.
-    
-    store_features : bool, optional
-        If true, the features will be stored
-        as h5 file for reuse.
-
-    evaluate : bool, optional, default=True
-        If true, the performance of trained classifier
-        will be evaluated and printed on the test
-        set.
-
-    save : bool, optioanl, default=False
-        If true, the evaluation report
-        will be saved into the rf_results.txt
-        file.
+        The hyper-parameters of each classification model. \n
+        The keys should be the model names and values being
+        detailed hyper-parameter settings.
+        - 'rf': must define 'n_estimators',
+        - 'svm' : must define 'C' and 'kernel'
+        - 'logreg': must define 'penalty' \n
+        other arguments should be defined in key 'kwargs', with
+        its value being a dictionary of the arguments.
 
     args : argparse.namespace, optional
-        Must be defined when save=True.
         Used to record experiment
-        settings. Must contain the following:
+        settings. Must contain the following keys:
         - 'n_features' (int) : Number of features to keep in
         ICA to reduce the dimension. If negative, all features used.
         - 'sample_length' (float): Length of sample interval (in seconds)
@@ -83,10 +74,23 @@ def classifier_timefreq(
         Must be one of ['stft', 'cwt', 'wvd', 'pwvd'].
         - 'model_name' (str) : The classification model used. \n
         Options: 'rf' : random forest; 'svm' : Support Vector Machine (CSVM)
+        - 'store_features' (bool) : If true, the time-frequency features
+        will be stored in a h5 file for reuse.
+
+    seed : int, optional, default=2025
+        Random seed used for train-test split
+        and training the random forest.
+
+    evaluate : bool, optional, default=True
+        If true, the performance of trained classifier
+        will be evaluated and printed on the test
+        set.
 
     verbose : int, optional, default=1
         Level of stage-wise reports.
-        If set to 0, nothing will be printed.
+        0 - nothing printed. \n
+        1 - experiment progress. \n
+        2 - details of classifier included.
 
     n_jobs : int, optional, default=-1
         Number of jobs to run in parallel. \n
@@ -95,14 +99,11 @@ def classifier_timefreq(
     n_folds : int, optional, default=5
         Number of folds in the K-fold cross-validation.
 
-    result_file : str, optional
-        The name of the file in which results
-        should be saved. \n
-        Only valid if save=True
-
-    detailed_log : bool, optional
-        If true, the confusion matrix and classification
-        report of each fold will be added.
+    save_confusion : bool, optioanl, default=False
+        If true, the confusion matrix and
+        detailed classification report of each fold
+        will be saved into the '{model_name}_results.txt'
+        file.
 
     Returns
     -------
@@ -113,7 +114,8 @@ def classifier_timefreq(
 
     ex_verbose = True if verbose > 1 else False
 
-    if store_features:
+    # Extract features
+    if args.store_features:
         feature_folder = './samples/timefreq/'
         feature_file = (f'len[{args.sample_length}]-start[{args.preictal_time}]'
                         f'-timefreq[{args.timefreq_method}].h5')
@@ -140,6 +142,7 @@ def classifier_timefreq(
     if verbose > 0:
         print(f'Extracted {dim_total} features')
 
+    # perform dimension reduction (optionally)
     if args.n_features <= 0:
         X = np.array(all_features)
     elif args.n_features <= dim_total:
@@ -153,13 +156,16 @@ def classifier_timefreq(
         )
 
     models = []
+
+    model_verbose = verbose > 1
     
     if evaluate:
         accuracies = []
         recalls = []
         fscores = []
         precisions = []
-    
+
+    # use K-fold cross-validation
     kf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
 
     for i, (train_index, test_index) in enumerate(kf.split(X, y)):
@@ -177,6 +183,7 @@ def classifier_timefreq(
             model = RandomForestClassifier(
                 n_estimators=n_estimators,
                 random_state=seed,
+                verbose=model_verbose,
                 **model_params['rf'].get('kwargs', {}))
 
             if verbose > 0:
@@ -195,6 +202,7 @@ def classifier_timefreq(
                 C=C,
                 kernel=kernel,
                 random_state=seed,
+                verbose=model_verbose,
                 **model_params['svm'].get('kwargs', {})
             )
 
@@ -207,11 +215,12 @@ def classifier_timefreq(
                 penalty = model_params['logreg']['penalty']
             except KeyError:
                 raise KeyError(
-                    "'C' must be defined "
+                    "'penalty' must be defined "
                     "in the configurations for logistic regression")
             model = LogisticRegression(
                 penalty=penalty,
                 random_state=seed,
+                verbose=model_verbose,
                 **model_params['logreg'].get('kwargs', {})
             )
 
@@ -225,39 +234,47 @@ def classifier_timefreq(
             )
     
         model.fit(X_train, y_train)
-
-        if evaluate:
-            y_pred = model.predict(X_test)
-            precision, recall, fscore, _ = precision_recall_fscore_support(
-                y_test, y_pred, average='binary'
-            )
-            accuracies.append(accuracy_score(y_test, y_pred))
-            recalls.append(recall)
-            precisions.append(precision)
-            fscores.append(fscore)
-            if detailed_log or i == 0:
-                evaluate_classifier(
-                    y_test, y_pred, save,
-                    model_params=model_params[args.model_name],
-                    exp_id=i,
-                    file_name=result_file,
-                    args=args,
-                    header_only=not detailed_log)
-        
         models.append(model)
-    
-    if evaluate and n_folds > 1:
-        separator = f"-------- Aggregate --------" + "\n"
-        metrics = (
-            f"Accuracy : {np.mean(accuracies)} ± {np.std(accuracies)}"
-            f"; Sensitivity (recall) : {np.mean(recalls)} ± {np.std(recalls)}"
-            f"; \n Precision : {np.mean(precisions)} ± {np.std(precisions)}"
-            f"; F-score : {np.mean(fscores)} ± {np.std(fscores)}"
+
+    if evaluate:
+        y_pred = model.predict(X_test)
+        precision, recall, fscore, _ = precision_recall_fscore_support(
+            y_test, y_pred, average='binary'
         )
-        with open(result_file, 'a') as f:
-            f.write(separator + metrics)
-            f.write("\n")
-        print(f'Summary metrics saved to {result_file}.')
+        accuracies.append(accuracy_score(y_test, y_pred))
+        recalls.append(recall)
+        precisions.append(precision)
+        fscores.append(fscore)
+        data = {
+            "model_name": args.model_name,
+            "sample_length": args.sample_length,
+            "preictal_time": args.preictal_time,
+            "accuracy_mean": np.mean(accuracies),
+            "accuracy_std": np.std(accuracies),
+            "accuracies": accuracies,
+            "recall_mean": np.mean(recalls),
+            "recall_std": np.std(recalls),
+            "recalls": recalls,
+            "precision_mean": np.mean(precisions),
+            "precision_std": np.std(precisions),
+            "precisions": precisions,
+            "fscore_mean": np.mean(fscore),
+            "fscore_std": np.std(fscore),
+            "fscores": fscores
+        }
+        save_to_csv(data, 'classifier_results.csv')
+
+        if save_confusion:
+            evaluate_classifier(
+                y_test, y_pred, save_confusion,
+                model_params=model_params[args.model_name],
+                exp_id=i,
+                file_name=f'{args.model_name}_results.txt',
+                args=args
+            )
+
+            if verbose > 0 and i == (n_folds-1):
+                print(f'Confusion matrices saved to {args.model_name}_results.txt.')
 
     return models
 

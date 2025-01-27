@@ -12,3 +12,4 @@ summary.txt
 try_*.py
 *_results.txt
 results.txt
+*.csv

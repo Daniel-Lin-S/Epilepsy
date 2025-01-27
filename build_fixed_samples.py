@@ -7,7 +7,7 @@ import os
 import argparse
 
 
-parser = argparse.ArgumentParser(description="Build classification samples for EEG data.")
+parser = argparse.ArgumentParser(description="Build classification samples on fixed period.")
 
 parser.add_argument('--sample_times', type=float, nargs='+', default=[5.0, 10.0, 20.0],
                     help="List of sample times / length of samples (in seconds). "
