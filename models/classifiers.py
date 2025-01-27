@@ -30,13 +30,14 @@ def classifier_timefreq(
     verbose: int=1,
     n_jobs: int=-1,
     n_folds: int=5,
+    result_file: str='classifier_results.csv',
     save_confusion: bool=False
 ) -> list:
     """
     Build and train a classifier on
     features extracted using time-frequency decomposition. \n
     Train-test separation included, using K-Fold validation. \n
-    All metrics will be saved to classifier_results.csv
+    All metrics will be saved to a csv file
     if evaluate=True (by default).
 
     Parameters
@@ -98,6 +99,11 @@ def classifier_timefreq(
 
     n_folds : int, optional, default=5
         Number of folds in the K-fold cross-validation.
+    
+    result_file : str, optional
+        Name of the file in which classification metrics
+        are saved. \n
+        Default is 'classifier_results.csv'
 
     save_confusion : bool, optioanl, default=False
         If true, the confusion matrix and
@@ -263,6 +269,7 @@ def classifier_timefreq(
     if evaluate: # save aggregated metrics
         data = {
             "model_name": args.model_name,
+            "model_params": print_dict(model_params),
             "sample_length": args.sample_length,
             "preictal_time": args.preictal_time,
             "accuracy_mean": np.mean(accuracies),
@@ -274,11 +281,13 @@ def classifier_timefreq(
             "precision_mean": np.mean(precisions),
             "precision_std": np.std(precisions),
             "precisions": precisions,
-            "fscore_mean": np.mean(fscore),
-            "fscore_std": np.std(fscore),
+            "fscore_mean": np.mean(fscores),
+            "fscore_std": np.std(fscores),
             "fscores": fscores
         }
-        save_to_csv(data, 'classifier_results.csv')
+        save_to_csv(data, result_file)
+        if verbose > 0:
+            print(f'Metrics saved to {result_file}')
 
     return models
 

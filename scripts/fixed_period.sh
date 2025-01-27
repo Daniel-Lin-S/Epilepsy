@@ -13,6 +13,7 @@ for sample_length in "${sample_lengths[@]}"; do
         --sample_length $sample_length \
         --preictal_time $preictal_time \
         --select_channels \
-        --model_name $model_name
+        --model_name $model_name \
+        --n_features 100
     done
 done
