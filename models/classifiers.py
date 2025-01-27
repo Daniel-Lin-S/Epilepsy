@@ -236,15 +236,31 @@ def classifier_timefreq(
         model.fit(X_train, y_train)
         models.append(model)
 
-    if evaluate:
-        y_pred = model.predict(X_test)
-        precision, recall, fscore, _ = precision_recall_fscore_support(
-            y_test, y_pred, average='binary'
-        )
-        accuracies.append(accuracy_score(y_test, y_pred))
-        recalls.append(recall)
-        precisions.append(precision)
-        fscores.append(fscore)
+        if evaluate:
+            y_pred = model.predict(X_test)
+            precision, recall, fscore, _ = precision_recall_fscore_support(
+                y_test, y_pred, average='binary'
+            )
+            accuracies.append(accuracy_score(y_test, y_pred))
+            recalls.append(recall)
+            precisions.append(precision)
+            fscores.append(fscore)
+
+            if save_confusion:
+                evaluate_classifier(
+                    y_test, y_pred, save_confusion,
+                    model_params=model_params[args.model_name],
+                    exp_id=i,
+                    file_name=f'{args.model_name}_results.txt',
+                    args=args
+                )
+
+                if verbose > 0 and i == (n_folds-1):
+                    print(
+                        'Confusion matrices saved to '
+                        f'{args.model_name}_results.txt.')
+
+    if evaluate: # save aggregated metrics
         data = {
             "model_name": args.model_name,
             "sample_length": args.sample_length,
@@ -263,18 +279,6 @@ def classifier_timefreq(
             "fscores": fscores
         }
         save_to_csv(data, 'classifier_results.csv')
-
-        if save_confusion:
-            evaluate_classifier(
-                y_test, y_pred, save_confusion,
-                model_params=model_params[args.model_name],
-                exp_id=i,
-                file_name=f'{args.model_name}_results.txt',
-                args=args
-            )
-
-            if verbose > 0 and i == (n_folds-1):
-                print(f'Confusion matrices saved to {args.model_name}_results.txt.')
 
     return models
 
