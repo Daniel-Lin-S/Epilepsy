@@ -14,6 +14,6 @@ for sample_length in "${sample_lengths[@]}"; do
         --preictal_time $preictal_time \
         --select_channels \
         --model_name $model_name \
-        --n_features 100
+        --n_features 40
     done
 done

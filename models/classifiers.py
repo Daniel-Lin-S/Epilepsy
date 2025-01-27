@@ -144,6 +144,7 @@ def classifier_timefreq(
                 x, sfreq, args.timefreq_method, n_jobs, ex_verbose)
     
     dim_total = all_features.shape[1]
+    n_samples = all_features.shape[0]
 
     if verbose > 0:
         print(f'Extracted {dim_total} features')
@@ -151,14 +152,14 @@ def classifier_timefreq(
     # perform dimension reduction (optionally)
     if args.n_features <= 0:
         X = np.array(all_features)
-    elif args.n_features <= dim_total:
+    elif args.n_features <= min(n_samples ,dim_total):
         print(f'Reducing dimension to {args.n_features} ...')
         ica = FastICA(n_components=args.n_features)
         X = ica.fit_transform(all_features)
     else:
         raise ValueError(
             f'n_features ({args.n_features}) cannot exceed total '
-            f'number of features: {dim_total}.'
+            f'number of features: {dim_total} and number of samples {n_samples}.'
         )
 
     models = []

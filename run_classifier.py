@@ -88,6 +88,6 @@ if __name__ == '__main__':
     classifier_timefreq(
         x, y, sfreq,
         model_params=model_params, args=args,
-        result_file=f'rf_results_ica{args.n_features}.csv')
+        result_file=f'{args.model_name}_results_ica{args.n_features}.csv')
 
     print("-" * 40)
