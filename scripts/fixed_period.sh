@@ -1,6 +1,8 @@
 #!/bin/bash
 
-model_name=logreg   # rf svm logreg
+echo "Please enter the model name (rf, svm, logreg):"
+read model_name
+
 sample_lengths=(5.0 10.0 20.0)
 preictal_times=(10.0 20.0 30.0 40.0 50.0 60.0 70.0 80.0 90.0)
 
