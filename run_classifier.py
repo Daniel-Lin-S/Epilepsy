@@ -8,7 +8,7 @@ from utils.tools import (
 )
 from utils.preprocess import read_sampling_rate
 from utils.channel_selection import find_significant_channels
-from data_loader import build_classification_samples
+from data_loader import build_samples
 
 
 parser = argparse.ArgumentParser(description='Train Random Forest for seizure prediction')
@@ -25,7 +25,7 @@ parser.add_argument('--model_name', type=str, default='rf',
 # Drawing samples
 parser.add_argument('--sample_length', type=float, default=10.0,
                     help='Length of sample interval (in seconds)')
-parser.add_argument('--preictal_time', type=float, default=20.0,
+parser.add_argument('--preictal_time', type=float, default=30.0,
                     help='The time before seizure start (in seconds) to take the sample')
 parser.add_argument('--sample_mode', type=str, default='undersample',
                     help='The method used to balance two classes')
@@ -46,7 +46,7 @@ parser.add_argument('--n_features', type=int, default=-1,
 if __name__ == '__main__':
     args = parser.parse_args()
 
-    sample_folder = './samples'
+    sample_folder = './samples/classification'
     sample_file = (f'len[{args.sample_length}]-'
                    f'start[{args.preictal_time}]-{args.sample_mode}.h5')
     sample_path = os.path.join(sample_folder, sample_file)
@@ -72,11 +72,11 @@ if __name__ == '__main__':
             selected_channels = None
 
         print('Extracting samples ...')
-        build_classification_samples(
+        build_samples(
             args.data_folder, output_file=sample_path,
             selected_channels=selected_channels,
-            sample_time=args.sample_length, preictal_time=args.preictal_time,
-            verbose=False)
+            mode='classification', verbose=False,
+            sample_time=args.sample_length, preictal_time=args.preictal_time)
 
     x, y = read_samples(sample_path)
     print(f'Number of samples {x.shape[0]}, '

@@ -9,9 +9,42 @@ from multiprocessing import Pool
 
 def extract_features_timefreq(
     x: np.ndarray, sfreq: int,
-    timefreq_method: str, n_jobs: int,
-    verbose: bool
+    timefreq_method: str, n_jobs: int
 ) -> np.ndarray:
+    """
+    Extract time-frequency graph summary statistics, processed in parallel. \n
+    Summary statistics: 
+    * **mav** Mean absolute value
+    * **std** Standard deviation, variation around the mean
+    * **rms** Root mean squares, indicating power of the signal
+    * **skewness** Asymmetry of the data distribution around its mean
+    * **kurtosis** tells how much data are in the tails
+    compared to around mean
+    * **mobility** first-order variation:
+    relative variation in the rate of change. \n
+    \t Mobility = sqrt( Var(Delta x) / Var(x) ) \n
+    \t where Delta x is the first-order difference of x.
+    * **complexity** second-order variation \n
+    \t Complexity = Mobility(Delta x) / Mobility(x)
+
+    Parameters
+    ----------
+    x : numpy.ndarray
+        the input signal of shape (samples, channels, length)
+    sfreq : int
+        the sampling frequency
+    timefreq_method : str
+        the method used to turn x into time-frequency graph.
+        one of stft, cwt, wvd, pwvd
+    n_jobs : int
+        number of parallel processors used to convert the
+        samples.
+
+    Return
+    ------
+    features : np.ndarray
+        of shape (samples, n_features)
+    """
     n_samples, n_channels, _ = x.shape
     # store features from all channels
     all_features = []
@@ -19,7 +52,7 @@ def extract_features_timefreq(
     if n_jobs == -1:
         n_jobs = os.cpu_count()
 
-    args = [(i, x, n_channels, sfreq, timefreq_method, verbose)
+    args = [(i, x, n_channels, sfreq, timefreq_method)
             for i in range(n_samples)]
 
     with Pool(processes=n_jobs) as pool:
@@ -39,18 +72,18 @@ def extract_features_timefreq(
 
     return np.array(all_features)
 
-def _process_sample(i: int, x: np.ndarray, n_channels: int,
-                   sfreq: int, timefreq_method: str, verbose: bool):
+def _process_sample(
+        i: int, x: np.ndarray, n_channels: int,
+        sfreq: int, timefreq_method: str
+    ) -> np.ndarray:
     """
     Process a single sample (patient) to extract its features.
     """
-    if verbose:
-        print(f'Handling sample {i} ....')
     sample_features = []
     
     for c in range(n_channels):
         # Perform time-frequency decomposition
-        freqs, _, x_cwt = nk.signal_timefrequency(
+        freqs, _, x_timefreq = nk.signal_timefrequency(
             x[i, c, :], sampling_rate=sfreq,
             method=timefreq_method,
             min_frequency=1., max_frequency=80.,
@@ -58,22 +91,20 @@ def _process_sample(i: int, x: np.ndarray, n_channels: int,
         )
         
         # Extract summary statistics
-        features = cwt_summary_features(x_cwt, freqs, labels=False)
+        features = timefreq_summary_features(x_timefreq, freqs, labels=False)
         sample_features.append(features.flatten())
 
-    if verbose:
-        print(f'Finished feature extraction of sample {i}')
     return np.concatenate(sample_features)
 
 
-def cwt_summary_features(
-        x_cwt: np.ndarray,
+def timefreq_summary_features(
+        x_timefreq: np.ndarray,
         freqs: np.ndarray,
         labels: bool=False
     ) -> Union[Dict[str, Dict[str, float]], np.ndarray]:
     """
     Extracts summary statistics from each frequency band
-    of the cwt transformed signal. \n
+    of the timefreq transformed signal. \n
     Bands:
     * **Gamma** (30-80 Hz)
     * **Beta** (13-30 Hz)
@@ -96,8 +127,8 @@ def cwt_summary_features(
     
     Parameters
     ----------
-    x_cwt : np.ndarray
-        The CWT transformed signal with shape (n_freqs, length),
+    x_timefreq : np.ndarray
+        The timefreq transformed signal with shape (n_freqs, length),
         where n_freqs is the number of frequency channels.
     freqs : np.ndarray
         The array of frequencies (in Hz) corresponding to
@@ -117,20 +148,20 @@ def cwt_summary_features(
         mean absolute value (MAV), standard deviation (STD),
         skewness, kurtosis, RMS, mobility,
         signal complexity, and MAV ratio (for adjacent bands). \n
-        If labels = False, returns a np.ndarray
+        If labels = False, returns a 1 dimensional np.ndarray
         of all the features (float)
     """
     
     # Store features for each frequency band
     features = {}
 
-    segmented_cwtm = _segment_cwt_bands(x_cwt, freqs)
+    segmented_timefreq = _segment_timefreq_bands(x_timefreq, freqs)
 
-    band_names = list(segmented_cwtm.keys())
+    band_names = list(segmented_timefreq.keys())
     
     # Iterate through each frequency band
     for i, band in enumerate(band_names):
-        band_data = segmented_cwtm[band]
+        band_data = segmented_timefreq[band]
         
         # Compute the summary features
         mav = np.mean(np.abs(band_data), axis=1)  # Mean absolute value
@@ -150,7 +181,7 @@ def cwt_summary_features(
         # Compute MAV ratio with previous band
         if i > 0:
             prev_band = band_names[i-1]
-            prev_band_mav = np.mean(np.abs(segmented_cwtm[prev_band]))
+            prev_band_mav = np.mean(np.abs(segmented_timefreq[prev_band]))
             mav_ratio = np.mean(mav) / prev_band_mav
         else:
             mav_ratio = np.nan  # No previous band for first frequency band
@@ -176,7 +207,7 @@ def _nest_dict_to_numpy_array(
         features_dict: Dict[str, Dict[str, float]]
     ) -> np.ndarray:
     """
-    Converts the nested dictionary (output of `cwt_summary_features`)
+    Converts the nested dictionary (output of `timefreq_summary_features`)
     of features into a 1D numpy array.
 
     Parameters
@@ -202,11 +233,11 @@ def _nest_dict_to_numpy_array(
     return np.array(all_features)
 
 
-def _segment_cwt_bands(
-        x_cwt: np.ndarray, freqs: np.ndarray
+def _segment_timefreq_bands(
+        x_timefreq: np.ndarray, freqs: np.ndarray
     ) -> Dict[str, np.ndarray]:
     """
-    Segments the CWT transformed signal into different frequency bands.
+    Segments the timefreq transformed signal into different frequency bands.
     * **Gamma** (30-80 Hz)
     * **Beta** (13-30 Hz)
     * **Alpha** (8-13 Hz)
@@ -215,8 +246,8 @@ def _segment_cwt_bands(
     
     Parameters
     ----------
-    x_cwt : np.ndarray
-        The CWT transformed signal with shape (n_freqs, length),
+    x_timefreq : np.ndarray
+        The timefreq transformed signal with shape (n_freqs, length),
         where n_freqs is the number of frequency channels.
     
     freqs : np.ndarray
@@ -226,7 +257,7 @@ def _segment_cwt_bands(
     -------
     Dict[str, np.ndarray]
         A dictionary where the keys are the frequency bands
-        and the values are the segmented CWT signals. \n
+        and the values are the segmented timefreq signals. \n
         Each value is an ndarray of shape (num_freqs, 5000),
         where num_freqs is the number of frequency channels
         in that band.
@@ -240,12 +271,12 @@ def _segment_cwt_bands(
         "delta": (1, 4)
     }
 
-    # Dictionary to store segmented CWT data for each frequency band
+    # Dictionary to store segmented timefreq data for each frequency band
     segmented_data: Dict[str, np.ndarray] = {}
 
     for band, (low, high) in freq_bands.items():
         indices = np.where((freqs >= low) & (freqs <= high))[0]
 
-        segmented_data[band] = x_cwt[indices, :]
+        segmented_data[band] = x_timefreq[indices, :]
         
     return segmented_data

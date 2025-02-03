@@ -1,5 +1,4 @@
-from data_loader import build_classification_samples
-from utils.preprocess import read_sampling_rate
+from data_loader import build_samples
 from utils.tools import load_set_from_file
 from utils.channel_selection import find_significant_channels
 
@@ -21,7 +20,7 @@ parser.add_argument('--n_negative', type=int, default=-1,
                     "Default: -1 (same number as positive samples)")
 parser.add_argument('--filter_channels', type=bool, default=True,
                     help="Whether to filter out insignificant channels")
-parser.add_argument('--sample_folder', type=str, default='./samples',
+parser.add_argument('--sample_folder', type=str, default='./samples/classification',
                     help="Folder path to save the generated samples. Default: './samples'")
 parser.add_argument('--data_folder', type=str, default='./dataset',
                     help="Path to the folder under which edf files are stored. "
@@ -30,8 +29,6 @@ parser.add_argument('--data_folder', type=str, default='./dataset',
 
 if __name__ == '__main__':
     args = parser.parse_args()
-
-    sfreq = read_sampling_rate(os.path.join(args.data_folder, 'summary.txt'))
 
     for sample_time in args.sample_times:
         for preictal_time in args.preictal_times:
@@ -54,10 +51,11 @@ if __name__ == '__main__':
                 os.makedirs(args.sample_folder)
 
             if not os.path.exists(file_path):
-                print(f'Building samples with length {round(sample_time, 1)}s'
+                print(f'Building classification samples with length {round(sample_time, 1)}s'
                     f' from {round(preictal_time, 1)}s before onset start time')
-                build_classification_samples(
+                build_samples(
                     args.data_folder, output_file=file_path,
                     selected_channels=selected_channels,
                     sample_time=sample_time, preictal_time=preictal_time,
+                    mode='classification',
                     n_negative=args.n_negative)

@@ -5,17 +5,19 @@ import mne
 from mne.io.edf.edf import RawEDF
 import random
 from typing import List, Tuple, Optional, Union
+import warnings
 
 from utils.preprocess import read_seizure_times
-from utils.tools import check_labels
+from utils.tools import check_labels, check_seizure_overlap, distance_to_closest_seizure
 
 
 # TODO - add other modes of sample balancing (only downsampling now)
 
-def build_classification_samples(
+def build_samples(
         folder_path: str, output_file: Optional[str]=None,
         selected_channels: Optional[List[str]]=None,
-        verbose: bool=True,
+        seed: int=2025,
+        verbose: bool=True, mode: str='classification',
         **kwargs) -> Union[None, Tuple[np.ndarray, np.ndarray]]:
     """    
     Obtain positive (ictal) and negative (non-ictal) samples from EEG signals
@@ -40,27 +42,39 @@ def build_classification_samples(
         if True, print the information of
         classification samples extracted.
 
+    mode : str
+        The type of samples being built.
+        - 'classification' : samples stored with labels
+        - 'clustering' : unsupervised samples for clustering
+
     kwargs : Any
-        Passed to extract_samples. e.g. sample_time, preicetal_time,
-        n_negative, safe_gap. (see docstring of extract_samples)
+        Passed to `get_{mode}_samples`. \n
+        For classification: e.g. sample_time, preicetal_time,
+        see docstring of get_classification_samples. \n
+        For clustering: e.g. window_width, overlap,
+        see docstring of get_clustering_samples.
 
     Return
     -------
-    samples, labels : numpy.ndarray
-        of shape [num_samples, sample_length, num_channels]
+    xs, ys : numpy.ndarray
+        arrays of shape [num_samples, sample_length, num_channels]
         and [num_samples,] respectively. \n
-        The labels are 0 and 1s.
-        0 - no seizure
-        1 - seizure
+        Only returned if output_file is not given. \n
+        xs are the EEG signals and meaning of ys depends on
+        the mode. 
+        - 'classification' : labels, 0 for nonictal and 1 for preictal
+        - 'clustering' : distance to the closest seizure period.
     """
-    samples = []  # store EEG signals
-    labels = []   # store 0 1 labels
+    xs = []    # store EEG signals
+    ys = []    # store labels / tags
     flag = True
 
     # Go through all the files in the directory
     for root, _, files in os.walk(folder_path):
         for file in files:
             if file.endswith(".edf"):
+                if verbose:
+                    print(f'Processing {file}')
                 flag = False
                 patient_id = os.path.splitext(file)[0]
                 edf_file_path = os.path.join(root, file)
@@ -77,16 +91,20 @@ def build_classification_samples(
                     )
                 seizure_times = read_seizure_times(seizure_file)
 
-                # Extract positive and negative samples
-                pos_samples, neg_samples = _extract_samples(
-                    raw_data, seizure_times, selected_channels, **kwargs)
+                if mode == 'classification':
+                    ind_samples, ind_labels = get_classification_samples(
+                        raw_data, seizure_times, selected_channels, seed, **kwargs)
+                elif mode == 'clustering':
+                    ind_samples, ind_labels = get_clustering_samples(
+                        raw_data, seizure_times, selected_channels, seed, **kwargs)
+                else:
+                    raise ValueError(
+                        'Unsupported mode, must be one of [classification, clustering].'
+                    )
 
-                if pos_samples.shape[0] > 0:
-                    samples.append(pos_samples)
-                    labels.append(np.ones(pos_samples.shape[0]))
-                if neg_samples.shape[0] > 0:
-                    samples.append(neg_samples)
-                    labels.append(np.zeros(neg_samples.shape[0]))
+                if ind_samples.shape[0] != 0:
+                    xs.append(ind_samples)
+                    ys.append(ind_labels)
 
     if flag:
         raise FileNotFoundError(
@@ -95,23 +113,27 @@ def build_classification_samples(
         )
 
     # Convert lists to numpy arrays and store them
-    samples = np.concatenate(samples, axis=0)
-    labels = np.concatenate(labels, axis=0)
-    check_labels(labels)
+    xs = np.concatenate(xs, axis=0)
+    ys = np.concatenate(ys, axis=0)
+
+    if mode == 'classification':
+        check_labels(ys)
 
     if verbose:
-        print(f'Extracted {samples.shape[0]} samples'
-              f'with {samples.shape[1]} channels and '
-              f'{samples.shape[2]} time stamps')
-        print(f'Positive samples: {sum(labels == 1)}')
-        print(f'Negative samples: {sum(labels == 0)}')
+        print(f'Extracted {xs.shape[0]} samples '
+              f'with {xs.shape[1]} channels and '
+              f'{xs.shape[2]} time stamps')
+        
+        if mode == 'classification':
+            print(f'Positive samples: {sum(ys == 1)}')
+            print(f'Negative samples: {sum(ys == 0)}')
 
     if output_file:
         with h5py.File(output_file, 'w') as f:
-            f.create_dataset('x', data=samples)
-            f.create_dataset('y', data=labels)
+            f.create_dataset('x', data=xs)
+            f.create_dataset('y', data=ys)
     else:
-        return samples, labels
+        return xs, ys
 
 
 def read_samples(file_path: str) -> Tuple[np.ndarray, np.ndarray]:
@@ -127,12 +149,9 @@ def read_samples(file_path: str) -> Tuple[np.ndarray, np.ndarray]:
     
     Return
     -------
-    samples, labels : numpy.ndarray
-        of shape [num_samples, num_channels, sample_length]
+    x, y : numpy.ndarray
+        arrays of shape [num_samples, num_channels, sample_length]
         and [num_samples,] respectively. \n
-        The labels are 0 and 1s.
-        0 - no seizure
-        1 - seizure
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f'Cannot find file {file_path}')
@@ -141,10 +160,11 @@ def read_samples(file_path: str) -> Tuple[np.ndarray, np.ndarray]:
         return f['x'][:], f['y'][:]
 
 
-def _extract_samples(
+def get_classification_samples(
         raw_data: RawEDF,
         seizure_times: List[Tuple[int, int]],
         selected_channels: Optional[List[str]]=None,
+        seed: int=2025,
         sample_time: float=10.0, preictal_time: float=10.0,
         n_negative: int=-1,
         safe_gap: float=300.0
@@ -167,6 +187,10 @@ def _extract_samples(
 
     selected_channels : List[str]
         If given, only data from these channels will be kept.
+    
+    seed : int, optional
+        The random seed used for taking negative samples. \n
+        Default is 2025.
     
     sample_time : float, optional
         The length of each sample in samples. \n
@@ -193,9 +217,11 @@ def _extract_samples(
     -------
     Tuple[np.ndarray, np.ndarray]
         A tuple of two numpy arrays:
-        - Positive samples (pre-ictal segments)
-        - Negative samples (random segments far from seizures)
+        - samples of shape (n_samples, n_channels, sample_length)
+        - labels of shape (n_samples,) 0 for not preictal, 1 for preictal
     """
+    random.seed(seed)
+
     positive_samples = []
     negative_samples = []
 
@@ -203,14 +229,17 @@ def _extract_samples(
 
     sample_length = int(sample_time * sfreq)
 
+    if selected_channels:
+        raw_data_selected = raw_data.pick(selected_channels)
+    else:
+        raw_data_selected = raw_data
+
     # Extract positive samples
     for start_idx, _ in seizure_times:
         pre_ictal_end = int(start_idx) - int(preictal_time * sfreq)
         pre_ictal_start = pre_ictal_end - sample_length
 
         if pre_ictal_start >= 0:
-            if selected_channels:
-                raw_data_selected = raw_data.pick(selected_channels)
             positive_samples.append(
                 raw_data_selected.get_data(
                     start=pre_ictal_start, stop=pre_ictal_end))
@@ -232,16 +261,14 @@ def _extract_samples(
         random_start = random.randint(0, len(raw_data.times) - sample_length)
         random_end = random_start + sample_length
 
-        overlap = False
-        for seizure_start, seizure_end in seizure_times:
-            if (random_start < (seizure_end + distance)
-                and random_end > (seizure_start - distance)):
-                overlap = True
-                break
+        # ensure safe distance from seizure periods
+        overlap = check_seizure_overlap(
+            seizure_times, interval=(random_start, random_end),
+            distance=distance)
         
         if not overlap:
             negative_samples.append(
-                raw_data.get_data(start=random_start, stop=random_end))
+                raw_data_selected.get_data(start=random_start, stop=random_end))
         attempts += 1
 
     if len(negative_samples) < n_negative:
@@ -250,5 +277,136 @@ def _extract_samples(
             "were extracted due to overlap issues. "
             "Try reduce sample_time or safe_gap."
         )
+    
+    positive_samples = np.array(positive_samples)   # (n, dim)
+    negative_samples = np.array(negative_samples)   # (n, dim)
+    samples = np.concatenate([positive_samples, negative_samples], axis=0)
+    labels = np.concatenate(
+        [np.ones(positive_samples.shape[0]), np.zeros(negative_samples.shape[0])],
+        axis=0)
 
-    return np.array(positive_samples), np.array(negative_samples)
+    return samples, labels
+
+
+def get_clustering_samples(
+        raw_data: RawEDF, seizure_times: List[Tuple[int, int]],
+        selected_channels: Optional[List[str]]=None,
+        seed: int=2025,
+        window_width: float=5.0, overlap: float=1.0,
+        preictal_interval: float=600.,
+        preictal_width: Optional[float]=None,
+        random_samples: int = 500
+    ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Extract samples for clustering from the long series
+    of RawEDF object using sliding windows.
+    - fixed windows before seizure starting time
+    - random windows (not overlapping with ictal periods)
+
+    Parameters
+    ----------
+    raw_data : RawEDF
+        The long time series data.
+    seizure_times : list of tuple of int
+        List of tuples where each tuple contains
+        the start and end times of a seizure period
+        (the exact time stamps). \n
+        Assumed to be the output of `utils.preprocess.read_seizure_times`.
+    selected_channels : List[str]
+        If given, only data from these channels will be kept.
+    seed : int, optional
+        The random seed used for taking negative samples. \n
+        Default is 2025.
+    window_width : float
+        The length of the windows in seconds.
+    overlap : float
+        The overlap between consecutive windows in seconds,
+        used for taking windows in preictal stage.
+    preictal_interval : float, optional
+        The time interval before onset time from which to
+        take the preictal samples (in seconds) \n
+        Default is 600 s (10 minutes)
+    preictal_width : float, optioanl
+        If given, the window width of preictal stage
+        will be taken as this value. Otherwise,
+        it is the same as the other windows.
+    random_samples : int, optional, default=500
+        The number of random segments to sample from
+        the time series outside preictal periods.
+
+    Returns
+    -------
+    samples : numpy.ndarray
+        Array of shape
+        [n_samples, n_channels, window_width]
+        containing the EEG samples
+    dists_to_seizure : np.ndarray
+        1 dimensional array of same length as n_samples,
+        each value (integer) represents the distance
+        to the closest seizure period
+        of the sample. \n
+        Positive distance: preictal,
+        negative distance: postictal,
+        nan: no seizure in the file.
+    """
+    random.seed(seed)
+
+    samples = []
+    dists_to_seizure = []
+
+    sfreq = raw_data.info['sfreq']
+
+    # Extract preictal windows
+    if preictal_width is None:
+        preictal_width = window_width
+    
+    if selected_channels:
+        raw_data_selected = raw_data.pick(selected_channels)
+    else:
+        raw_data_selected = raw_data
+
+    for i, (seizure_start, seizure_end) in enumerate(seizure_times):
+        if i == 0:
+            prev_end = 0
+
+        # slide windows backwards
+        sample_start = seizure_start - int(preictal_width * sfreq)
+        while sample_start > seizure_start - int(preictal_interval * sfreq):
+            if sample_start < prev_end:
+                warnings.warn(
+                    "Not enough temporal length in the interictal stage. "
+                    f"Requested: {preictal_interval}s, available: "
+                    f"{(seizure_start - prev_end) / sfreq:.4f}s"
+                )
+                break
+
+            sample_end = sample_start + int(preictal_width * sfreq)
+            sample = raw_data_selected.get_data(
+                start=sample_start, stop=sample_end)
+            samples.append(sample)
+            dists_to_seizure.append(seizure_start-sample_end)
+            sample_start -= int((preictal_width - overlap) * sfreq)
+        
+        prev_end = seizure_end
+    
+    # Add random intervals
+    total_samples = len(raw_data_selected)
+    for _ in range(random_samples):
+        sample_start = random.randint(0, total_samples - int(window_width * sfreq))
+        sample_end = sample_start + int(preictal_width * sfreq)
+
+        overlap = check_seizure_overlap(
+            seizure_times, interval=(sample_start, sample_end))
+
+        if not overlap:
+            sample = raw_data_selected.get_data(
+                start=sample_start, stop=sample_end)
+            samples.append(sample)
+            if len(seizure_times) == 0: # no seizure in the file
+                dist = np.inf
+            else:
+                dist = distance_to_closest_seizure(
+                    (sample_start, sample_end), seizure_times)
+            dists_to_seizure.append(dist)
+    
+    return np.array(samples), np.array(dists_to_seizure)

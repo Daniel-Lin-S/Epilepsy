@@ -280,3 +280,105 @@ def save_to_csv(data: dict, file_path: str):
     header = not pd.io.common.file_exists(file_path)
 
     df.to_csv(file_path, mode='a', header=header, index=False)
+
+
+def check_seizure_overlap(
+        seizure_times: List[Tuple[int, int]],
+        interval: Tuple[int, int],
+        distance: int=0
+    ) -> bool:
+    """
+    Check whether the given time interval overlaps with any
+    of the seizure time.
+
+    Parameters
+    ----------
+    seizure_times : list of tuple of int
+        A list of tuples where each tuple represents
+        the start and end time stamps of a seizure period.
+    interval : tuple of int
+        A tuple representing the start and end time stamps
+        of a given interval to check for overlap,
+        where the first element is the start time
+        and the second element is the end time.
+    distance : int, optional
+        A safe distance from the seizure interval.
+        Default is 0.
+
+    Returns
+    -------
+    bool
+        Returns `True` if the interval overlaps with any of the seizure times, `False` otherwise.
+    """
+    interval_start, interval_end = interval
+
+    for seizure_start, seizure_end in seizure_times:
+        # Check if the interval overlaps with the seizure period
+        if interval_end > (seizure_start - distance) and (
+            interval_start < (seizure_end + distance)):
+            return True
+
+    return False
+
+
+def distance_to_closest_seizure(
+        interval: Tuple[int, int],
+        seizure_times: List[Tuple[int, int]]
+    ) -> int:
+    """
+    Find the distance from a given interval to the closest seizure time.
+
+    Parameters
+    ----------
+    interval : tuple of int
+        A tuple representing the start and end time stamps
+        of a given interval to check for overlap,
+        where the first element is the start time
+        and the second element is the end time.
+    seizure_times : list of tuple of int
+        A list of tuples where each tuple represents
+        the start and end time stamps of a seizure period.
+
+    Returns
+    -------
+    dist_to_seizure : float
+        The distance to the closest seizure start or end time. \n
+        Positive if the interval is preictal, 
+        negative if it is postictal,
+        0 if it is right next to an ictal stage.
+    
+    Raise
+    -----
+    Exception
+        if the given interval is 
+    """
+    if check_seizure_overlap(seizure_times, interval):
+        raise Exception(
+            'The interval is overlapping with a seizure (ictal) period, '
+            ' cannot calculate distance')
+    
+    if len(seizure_times) == 0:
+        raise ValueError(
+            'No seizure given in seizure_times'
+        )
+
+    interval_start, interval_end = interval
+    closest_distance = float('inf')
+
+    for (seizure_start, seizure_end) in seizure_times:
+        dist_pre = seizure_start - interval_end
+        dist_post = interval_start - seizure_end
+
+        if dist_pre >= 0 and dist_pre < closest_distance:
+            # interval before seizure
+            closest_distance = dist_pre
+            postictal = False
+        elif dist_post >= 0 and dist_post < closest_distance:
+            # interval after seizure
+            closest_distance = dist_post
+            postictal = True
+    
+    if postictal:
+        return - closest_distance
+    else:
+        return closest_distance

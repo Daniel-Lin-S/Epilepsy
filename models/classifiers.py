@@ -21,6 +21,9 @@ from utils.tools import (
 from data_loader import read_samples
 
 
+# TODO modify classifier_timefreq to return a model trained on all x instead of cross-validation. 
+# Perhaps make this into a class
+
 def classifier_timefreq(
     x: np.ndarray, y: np.ndarray, sfreq: float,
     model_params: Dict[str, dict],
@@ -118,8 +121,6 @@ def classifier_timefreq(
     """
     check_labels(y)
 
-    ex_verbose = True if verbose > 1 else False
-
     # Extract features
     if args.store_features:
         feature_folder = './samples/timefreq/'
@@ -135,13 +136,13 @@ def classifier_timefreq(
             all_features, y = read_samples(feature_path)
         else:
             all_features = extract_features_timefreq(
-                x, sfreq, args.timefreq_method, n_jobs, ex_verbose)
+                x, sfreq, args.timefreq_method, n_jobs)
             with h5py.File(feature_path, 'w') as f:
                 f.create_dataset('x', data=all_features)
                 f.create_dataset('y', data=y)
     else:
         all_features = extract_features_timefreq(
-                x, sfreq, args.timefreq_method, n_jobs, ex_verbose)
+                x, sfreq, args.timefreq_method, n_jobs)
     
     dim_total = all_features.shape[1]
     n_samples = all_features.shape[0]
