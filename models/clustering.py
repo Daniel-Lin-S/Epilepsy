@@ -103,7 +103,7 @@ class SeizureClustering:
         elif samples is not None and dists is not None:
             self.features = extract_features_timefreq(
                 samples, self.sfreq, self.timefreq_method, self.n_jobs)
-            self.dist = dists
+            self.dists = dists
             
             if feature_file is not None:
                 with h5py.File(feature_file, 'w') as f:
