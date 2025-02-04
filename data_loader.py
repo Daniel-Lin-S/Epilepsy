@@ -166,7 +166,8 @@ def build_samples(
 
 def read_samples(
         file_path: str,
-        samples_only: bool=True
+        samples_only: bool=True,
+        handle_str: bool=True
     ) -> Union[Tuple[np.ndarray, np.ndarray], dict]:
     """
     Read samples and labels from h5 file.
@@ -181,6 +182,9 @@ def read_samples(
         If true, only retrieve xs and ys
         Otherwise, will return a dictionary
         with all key-value pairs stored in the file.
+    handle_str : bool
+        If true, the binary strings in the h5 file
+        will be converted to a list of strings.
     
     Return
     -------
@@ -202,7 +206,8 @@ def read_samples(
             data = {}
             for key in f.keys():
                 dataset = f[key][:]
-                if dataset.dtype.type is np.bytes_:
+
+                if handle_str and dataset.dtype.type is np.bytes_:
                     dataset = [s.decode('utf-8') for s in dataset]
 
                 data[key] = dataset

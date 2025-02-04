@@ -11,8 +11,7 @@ import os
 import h5py
 import warnings
 
-from feature_extraction import extract_features_timefreq
-from data_loader import read_samples
+from utils.feature_extraction import extract_features_timefreq
 
 
 class SeizureClustering:

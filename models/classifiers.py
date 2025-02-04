@@ -13,7 +13,7 @@ from typing import Optional, Dict
 import os
 import h5py
 
-from feature_extraction import extract_features_timefreq
+from utils.feature_extraction import extract_features_timefreq
 from utils.tools import (
     check_labels, print_args, print_dict, confusion_matrix_to_str,
     save_to_csv

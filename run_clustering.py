@@ -1,5 +1,5 @@
 from data_loader import build_samples, read_samples
-from utils.tools import load_set_from_file, get_patients_with_seizures
+from utils.tools import load_set_from_file
 from utils.preprocess import read_sampling_rate
 from utils.channel_selection import find_significant_channels
 from models.clustering import SeizureClustering
@@ -7,7 +7,6 @@ from models.clustering import SeizureClustering
 from sklearn.cluster import AgglomerativeClustering
 import os
 import argparse
-import numpy as np
 
 
 parser = argparse.ArgumentParser(description="Run clustering model.")
@@ -67,10 +66,11 @@ if __name__ == '__main__':
     if not os.path.exists(sample_folder):
         os.makedirs(sample_folder)
 
-    sample_configs = (f'width[{args.window_width}]-overlap[{args.overlap}]-'
-                   f'preictal[{args.preictal_interval}]-'
-                   f'nrand[{args.random_samples}]'
-                   )
+    sample_configs = (
+        f'width[{args.window_width}]-overlap[{args.overlap}]-'
+        f'preictal[{args.preictal_interval}]-'
+        f'nrand[{args.random_samples}]'
+        )
     
     feature_filename = f'{sample_configs}-timefreq[cwt].h5'
     sample_filename = f'{sample_configs}.h5'
