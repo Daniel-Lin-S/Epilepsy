@@ -6,11 +6,13 @@ from sklearn.manifold import TSNE
 from sklearn.neighbors import NearestNeighbors
 from sklearn.decomposition import FastICA
 import matplotlib.pyplot as plt
-from typing import Optional
+from typing import Optional, List
 import os
 import h5py
+import warnings
 
 from feature_extraction import extract_features_timefreq
+from data_loader import read_samples
 
 
 class SeizureClustering:
@@ -66,11 +68,11 @@ class SeizureClustering:
         self.seed = seed
         self.labels = None
         self.features = None
-        self.dists = None
+        self.features_meta = {}
 
     def extract_features(
             self, samples: Optional[np.ndarray]=None,
-            dists: Optional[np.ndarray]=None,
+            sample_dict: Optional[dict]=None,
             feature_file: Optional[str]=None):
         """
         Extract features from the time series samples
@@ -85,10 +87,12 @@ class SeizureClustering:
             Array of shape (num_samples, num_channels, sample_length)
             representing the time series samples. \n
             If not provided, will be read from h5 file
-        dists : np.ndarray, optional.
-            Array of shape (num_samples,) representing the distance
-            to the closest seizure for each sample. \n
-            If not provided, will be read from h5 file
+        sample_dict : np.ndarray, optional.
+            Dictionary with meta-information relating
+            to the samples, e.g. distance to seizure,
+            sample id (original file). \n
+            If not given, only the features themselves
+            are stored in the h5 file.
         feature_file : str, optional
             If provided, the extracted features and dists will be saved
             or read from the file. \n
@@ -96,23 +100,47 @@ class SeizureClustering:
             Otherwise, the extracted features will be saved to a
             h5 file.
         """
+        # clear previous entries
+        self.features = None
+        self.features_meta = {}
+
         if feature_file is not None and os.path.exists(feature_file):
             with h5py.File(feature_file, 'r') as f:
                 self.features = f['features'][:]
-                self.dists = f['distances'][:]
-        elif samples is not None and dists is not None:
+
+                for key in f.keys():
+                    if key != 'features':
+                        self.features_meta[key] = f[key][:]
+            # features_meta = read_samples(feature_file, samples_only=False)
+            # del features_meta['features']
+            # self.features_meta = features_meta
+
+        elif samples is not None:
             self.features = extract_features_timefreq(
                 samples, self.sfreq, self.timefreq_method, self.n_jobs)
-            self.dists = dists
-            
+            if sample_dict:  # record meta information
+                self.features_meta['distances'] = sample_dict['y']
+                for key in sample_dict.keys():
+                    if key != 'x' and key != 'y':
+                        self.features_meta[key] = sample_dict[key]
+
+            # Store features as a dataset in the HDF5 file
             if feature_file is not None:
                 with h5py.File(feature_file, 'w') as f:
-                    # Store features as a dataset in the HDF5 file
                     f.create_dataset('features', data=self.features)
-                    f.create_dataset('distances', data=dists)
+                    for key, item in self.features_meta.items():
+                        f.create_dataset(key, data=item)
+            
+            # change binary strings to strings
+            # for key in self.features_meta.keys():
+            #     dataset = self.features_meta[key]
+            #     if dataset.dtype.type is np.bytes_:
+            #         dataset = [s.decode('utf-8') for s in dataset]
+
+            #     self.features_meta[key] = dataset
         else:
             raise Exception(
-                'samples and dists must be provided '
+                'samples must be provided '
                 'if features have not been extracted. \n'
                 f'{feature_file} cannot be found.'
             )
@@ -120,7 +148,7 @@ class SeizureClustering:
     def fit(
             self,
             samples: Optional[np.ndarray]=None,
-            dists: Optional[np.ndarray]=None,
+            sample_dict: Optional[dict]=None,
             feature_file: Optional[str]=None,
             verbose: bool=True
         ):
@@ -135,9 +163,10 @@ class SeizureClustering:
             representing the time series samples. \n
             Must be provided if feature_file is not given
             or features have not been extracted.
-        dists : np.ndarray
-            Array of shape (num_samples,) representing the distance
-            to the closest seizure for each sample.
+        sample_dict : np.ndarray
+            Dictionary with meta-information relating
+            to the samples, e.g. distance to seizure,
+            sample id (original file)
         feature_file : str, optional
             If provided, the extracted features will be saved
             or read from the file. \n
@@ -149,7 +178,7 @@ class SeizureClustering:
             and the cluster sizes
         """
         self.extract_features(
-            samples, dists, feature_file)
+            samples, sample_dict, feature_file)
 
         if self.scaling:
             features = self.scaler.fit_transform(self.features)
@@ -173,9 +202,9 @@ class SeizureClustering:
         if verbose:
             self.get_cluster_sizes(verbose=True)
 
-    def predict_labels(
+    def predict(
             self, new_samples: np.ndarray,
-            dists: np.ndarray) -> np.ndarray:
+            sample_dict: Optional[dict]) -> np.ndarray:
         """
         Predict the cluster labels for new samples.
 
@@ -184,9 +213,10 @@ class SeizureClustering:
         new_samples : np.ndarray
             Array of shape (num_samples, num_channels, sample_length)
             representing the new time series samples.
-        dists : np.ndarray
-            Array of shape (num_samples,) representing the distance
-            to the closest seizure for each new sample.
+        sample_dict : np.ndarray
+            Dictionary with meta-information relating
+            to the samples, e.g. distance to seizure,
+            sample id (original file)
 
         Returns
         -------
@@ -196,7 +226,7 @@ class SeizureClustering:
         if self.model is None:
             raise ValueError("Model is not fitted yet. Please call 'fit' first.")
 
-        self.extract_features(new_samples, dists)
+        self.extract_features(new_samples, sample_dict)
 
         if self.scaling:
             features = self.scaler.transform(self.features)
@@ -231,12 +261,19 @@ class SeizureClustering:
             
         return cluster_sizes
 
+    def get_cluster_dists(self, cluster_id: int) -> np.ndarray:
+        """
+        Return distances to seizure of samples under this cluster
+        """
+        cluster_indices = np.where(self.labels == cluster_id)[0]
+        return self.features_meta['distances'][cluster_indices]
+
     def plot_clusters(self, file_path: Optional[str]=None) -> None:
         """
         Visualize the clustering results
         in 2D using t-SNE (t-Distributed Stochastic Neighbor Embedding)
         of the previous call of the model. \n
-        (`fit` or `predict_labels`)
+        (`fit` or `predict`)
 
         Parameter
         ---------
@@ -246,7 +283,8 @@ class SeizureClustering:
         """
         if self.labels is None:
             raise ValueError(
-                "Model is not fitted yet. Please call 'fit' first.")
+                "Model is not fitted yet. "
+                "Please call `fit` first.")
         
         # Reduce features to 2D for visualization
         tsne = TSNE(n_components=2, random_state=self.seed)
@@ -288,6 +326,7 @@ class SeizureClustering:
         if file_path:
             plt.savefig(file_path, dpi=300)
             print(f'figure saved to {file_path}')
+            plt.close()
         else:
             plt.show()
 
@@ -338,6 +377,7 @@ class SeizureClustering:
         if file_path:
             plt.savefig(file_path)
             print(f'figure saved to {file_path}')
+            plt.close()
         else:
             plt.show()
 
@@ -359,12 +399,17 @@ class SeizureClustering:
         will be replaced with a value larger than the
         maximum distance for visualisation.
         """
-        if self.labels is None or self.dists is None:
+        if self.labels is None or 'distances' not in self.features_meta:
             raise ValueError(
-                "Labels and distances must be set before visualizing.")
+                "Labels and distances must be set before visualizing."
+                "run `fit` or `predict` before running this function"
+                )
 
-        max_distance = np.nanmax(self.dists[~np.isinf(self.dists)])
-        dists_visual = np.where(np.isinf(self.dists), 2*max_distance, self.dists)
+        max_distance = np.nanmax(
+            self.features_meta['distances'][~np.isinf(self.features_meta['distances'])])
+        dists_visual = np.where(
+            np.isinf(self.features_meta['distances']),
+            2*max_distance, self.features_meta['distances'])
 
         plt.figure(figsize=(10, 6))
         plt.scatter(self.labels, dists_visual)
@@ -377,11 +422,12 @@ class SeizureClustering:
         if file_path:
             plt.savefig(file_path)
             print(f'figure saved to {file_path}')
+            plt.close()
         else:
             plt.show()
 
     def plot_histogram_dists(
-            self, cluster_id: int, bins: int=30,
+            self, cluster_ids: List[int], bins: int=30,
             file_path: Optional[str]=None
             ):
         """
@@ -390,8 +436,9 @@ class SeizureClustering:
 
         Parameters
         ----------
-        cluster_id : int
-            The ID of the cluster for which to plot the histogram of distances.
+        cluster_ids : list of int or int
+            The indices of the cluster(s) for
+            which to plot the histogram of distances.
         bins : int, optional
             Number of bins used to plot the histogram.
         file_path : str, optional
@@ -409,26 +456,33 @@ class SeizureClustering:
         But number of points with infinite distance
         in this cluster will be printed. 
         """
+        if isinstance(cluster_ids, int):
+            cluster_ids = [cluster_ids]
+
+        all_valid_dists = []
 
         # Check if the cluster_id is valid
-        if cluster_id not in np.unique(self.labels):
-            raise ValueError(
-                f"Invalid cluster ID: {cluster_id}. "
-                "Please provide a valid cluster ID.")
+        for cluster_id in cluster_ids:
+            if cluster_id not in np.unique(self.labels):
+                raise ValueError(
+                    f"Invalid cluster ID: {cluster_id}. "
+                    "Please provide a valid cluster ID.")
 
-        cluster_indices = np.where(self.labels == cluster_id)[0]
-        dists_in_cluster = self.dists[cluster_indices]
-        valid_dists = dists_in_cluster[np.isfinite(dists_in_cluster)]
-        if valid_dists.shape[0] < dists_in_cluster.shape[0]:
-            print(
-                f'{dists_in_cluster.shape[0] - valid_dists.shape[0]} samples'
-                ' in this cluster come from files with no seizure record'
-            )
+            dists_in_cluster = self.get_cluster_dists(cluster_id)
+            valid_dists = dists_in_cluster[np.isfinite(dists_in_cluster)]
+
+            all_valid_dists.extend(valid_dists)
+            if valid_dists.shape[0] < dists_in_cluster.shape[0]:
+                print(
+                    f'{dists_in_cluster.shape[0] - valid_dists.shape[0]} samples'
+                    f' in cluster {cluster_id} come from files with no seizure record'
+                )
 
         # Plot the histogram
         plt.figure(figsize=(8, 6))
-        plt.hist(valid_dists, bins=bins, color='skyblue', edgecolor='black')
-        plt.title(f"Histogram of Distances to Seizure Periods (Cluster {cluster_id})")
+        plt.hist(all_valid_dists, bins=bins, color='skyblue', edgecolor='black')
+        plt.title("Histogram of Distances to Seizure Periods"+ "\n" +
+                  f"for Clusters {cluster_ids}")
         plt.xlabel("Distance to Seizure (s)")
         plt.ylabel("Frequency")
         plt.grid(True)
@@ -436,5 +490,99 @@ class SeizureClustering:
         if file_path:
             plt.savefig(file_path, dpi=300)
             print(f'figure saved to {file_path}')
+            plt.close()
         else:
             plt.show()
+
+    def evaluate_cluster(self, cluster_id: int):
+        """
+        Analyses the presence of given cluster index (or indices)
+        in each pre-ictal segment.
+        
+        Parameters:
+        ----------
+        cluster_ids : int
+            The ID of the cluster to analyze in `self.labels`.
+
+        Returns:
+        -------
+        None
+            Prints the analysis results:
+            number of samples in the cluster in each pre-ictal segment,
+            proportion of pre-ictal segments in which the cluster is present,
+            and distribution of distances.
+        """
+        if cluster_id not in np.unique(self.labels):
+            raise ValueError(f"Cluster ID {cluster_id} not found in labels.")
+        if self.labels is None or (
+            'distances' not in self.features_meta) or (
+                'preictal_flag' not in self.features_meta):
+            raise ValueError(
+                "Labels and distances must be set before visualizing."
+                "run `fit` or `predict` before running this function"
+                )
+        
+        # Initialise variables for counting and analysis
+        num_segments = 0
+        num_segments_with_cluster = 0
+        cluster_counts = []
+        distance_values = []
+        
+        # Loop over consecutive segments of 1s in preictal_flags
+        start_idx = None
+        for i, flag in enumerate(self.features_meta['preictal_flag']):
+            if flag == 1:
+                if start_idx is None:
+                    start_idx = i  # Start a new segment
+            elif flag == 0 and start_idx is not None: # end of segment
+                segment_labels = self.labels[start_idx:i]
+                segment_dists = self.features_meta['distances'][start_idx:i]
+
+                cluster_count = np.sum(segment_labels == cluster_id)
+                cluster_counts.append(cluster_count)
+
+                distance_values.extend(segment_dists[segment_labels == cluster_id])
+                if cluster_count > 0:
+                    num_segments_with_cluster += 1
+                num_segments += 1
+                
+                # reset for a new segment
+                start_idx = None
+        
+        # Handle edge case: last segment if it ends at the last index
+        if start_idx is not None:
+            segment_labels = self.labels[start_idx:]
+            segment_dists = self.features_meta['distances'][start_idx:]
+            
+            cluster_count = np.sum(segment_labels == cluster_id)
+            cluster_counts.append(cluster_count)
+            distance_values.extend(segment_dists[segment_labels == cluster_id])
+            
+            if cluster_count > 0:
+                num_segments_with_cluster += 1
+            num_segments += 1
+        
+        if num_segments == 0:
+            warnings.warn("No preictal segments found in `self.preictal_flags`.")
+            return
+
+        cluster_proportion = (num_segments_with_cluster / num_segments
+                              if num_segments > 0 else 0)
+        
+        # Print results
+        print(f"Total number of preictal segments: {num_segments}")
+        print(f"Number of segments containing cluster {cluster_id}"
+              f": {num_segments_with_cluster}")
+        print(f"Proportion of segments containing cluster {cluster_id}"
+              f": {cluster_proportion:.2f}")
+        print(f"Cluster {cluster_id} sample counts in each segment: {cluster_counts}")
+        
+        # Print the distribution of distances for samples in the cluster
+        distance_values = np.array(distance_values)
+        if distance_values.size > 0:
+            print(f"Distribution of distances for cluster {cluster_id}"
+                  " samples in preictal segments:")
+            print(f"Min: {np.min(distance_values)}, Max: {np.max(distance_values)}, "
+                  f"Mean: {np.mean(distance_values)}, Std: {np.std(distance_values)}")
+        else:
+            print(f"No samples found for cluster {cluster_id} in any preictal segment.")

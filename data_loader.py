@@ -18,7 +18,7 @@ def build_samples(
         selected_channels: Optional[List[str]]=None,
         seed: int=2025,
         verbose: bool=True, mode: str='classification',
-        **kwargs) -> Union[None, Tuple[np.ndarray, np.ndarray]]:
+        **kwargs) -> dict:
     """    
     Obtain positive (ictal) and negative (non-ictal) samples from EEG signals
     stored in .edf and .edf.seizure files,
@@ -32,8 +32,7 @@ def build_samples(
     
     output_file : str
         If provided, the extracted dataset
-        and labels will be saved in HDF5 format,
-        and this function returns nothing.
+        and labels will be saved in HDF5 format.
     
     selected_channels : List[str], optional
         If given, only data from these channels will be kept.
@@ -43,9 +42,9 @@ def build_samples(
         classification samples extracted.
 
     mode : str
-        The type of samples being built.
-        - 'classification' : samples stored with labels
-        - 'clustering' : unsupervised samples for clustering
+        The type of samples being built. \n
+        * 'classification' : samples stored with labels
+        * 'clustering' : unsupervised samples for clustering
 
     kwargs : Any
         Passed to `get_{mode}_samples`. \n
@@ -56,17 +55,29 @@ def build_samples(
 
     Return
     -------
-    xs, ys : numpy.ndarray
-        arrays of shape [num_samples, sample_length, num_channels]
-        and [num_samples,] respectively. \n
-        Only returned if output_file is not given. \n
-        xs are the EEG signals and meaning of ys depends on
-        the mode. 
-        - 'classification' : labels, 0 for nonictal and 1 for preictal
-        - 'clustering' : distance to the closest seizure period.
+    dict
+        with the following keys:
+        - 'x' : numpy.ndarray of shape (num_samples, sample_length, num_channels),
+            represents the EEG signal (sample)
+        - 'y' : numpy.ndarray of shape (num_samples,), meaning of ys depends on
+          the mode. \n
+          'classification': labels, 0 for nonictal and 1 for preictal; \n
+          'clustering': distance to the closest seizure period.
+        - 'id' : numpy.ndarray of shape shape (num_samples,)
+          the ids of the edf file from which each sample is taken from,
+          each entry is a string.
+        - 'preictal_flag' : numpy.ndarray of shape shape (num_samples,)
+          if 1, the sample is taken based on an onset event.
+          if 0, the sample is taken randomly.
     """
+    random.seed(seed)
+    np.random.seed(seed)
+
     xs = []    # store EEG signals
     ys = []    # store labels / tags
+    ids = []   # 
+    # store flags for whether the sample is related to an onset event (seizure)
+    preictal_flags = []   
     flag = True
 
     # Go through all the files in the directory
@@ -94,17 +105,24 @@ def build_samples(
                 if mode == 'classification':
                     ind_samples, ind_labels = get_classification_samples(
                         raw_data, seizure_times, selected_channels, seed, **kwargs)
+                    flags = ind_labels
+                    n_samples = ind_samples.shape[0]
+                    id_marks = [patient_id] * n_samples
                 elif mode == 'clustering':
-                    ind_samples, ind_labels = get_clustering_samples(
+                    ind_samples, ind_labels, flags = get_clustering_samples(
                         raw_data, seizure_times, selected_channels, seed, **kwargs)
+                    n_samples = ind_samples.shape[0]
+                    id_marks = [patient_id] * n_samples
                 else:
                     raise ValueError(
                         'Unsupported mode, must be one of [classification, clustering].'
                     )
 
-                if ind_samples.shape[0] != 0:
+                if n_samples != 0:
                     xs.append(ind_samples)
                     ys.append(ind_labels)
+                    ids.extend(id_marks)
+                    preictal_flags.append(flags)
 
     if flag:
         raise FileNotFoundError(
@@ -115,6 +133,8 @@ def build_samples(
     # Convert lists to numpy arrays and store them
     xs = np.concatenate(xs, axis=0)
     ys = np.concatenate(ys, axis=0)
+    preictal_flags = np.concatenate(preictal_flags, axis=0)
+    ids = np.array(ids, dtype='S')
 
     if mode == 'classification':
         check_labels(ys)
@@ -132,11 +152,22 @@ def build_samples(
         with h5py.File(output_file, 'w') as f:
             f.create_dataset('x', data=xs)
             f.create_dataset('y', data=ys)
-    else:
-        return xs, ys
+            f.create_dataset('id', data=ids)
+            f.create_dataset('preictal_flag', data=preictal_flags)
+    
+    output_dict = {
+        'x' : xs,
+        'y' : ys,
+        'id' : ids,
+        'preictal_flag' : preictal_flags
+    }
+    return output_dict
 
 
-def read_samples(file_path: str) -> Tuple[np.ndarray, np.ndarray]:
+def read_samples(
+        file_path: str,
+        samples_only: bool=True
+    ) -> Union[Tuple[np.ndarray, np.ndarray], dict]:
     """
     Read samples and labels from h5 file.
     (assumed to be created by `process_data_and_store`)
@@ -146,19 +177,36 @@ def read_samples(file_path: str) -> Tuple[np.ndarray, np.ndarray]:
     file_path : str
         The path where the extracted dataset
         is saved in HDF5 format.
+    samples_only : bool
+        If true, only retrieve xs and ys
+        Otherwise, will return a dictionary
+        with all key-value pairs stored in the file.
     
     Return
     -------
     x, y : numpy.ndarray
         arrays of shape [num_samples, num_channels, sample_length]
         and [num_samples,] respectively. \n
+        If sample_only = True
+    dict
+        if sample_only = False.
+        all key-value pairs stored in the file.
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f'Cannot find file {file_path}')
 
     with h5py.File(file_path, 'r') as f:
-        return f['x'][:], f['y'][:]
+        if samples_only:
+            return f['x'][:], f['y'][:]
+        else:
+            data = {}
+            for key in f.keys():
+                dataset = f[key][:]
+                if dataset.dtype.type is np.bytes_:
+                    dataset = [s.decode('utf-8') for s in dataset]
 
+                data[key] = dataset
+            return data
 
 def get_classification_samples(
         raw_data: RawEDF,
@@ -221,6 +269,7 @@ def get_classification_samples(
         - labels of shape (n_samples,) 0 for not preictal, 1 for preictal
     """
     random.seed(seed)
+    np.random.seed(seed)
 
     positive_samples = []
     negative_samples = []
@@ -282,7 +331,8 @@ def get_classification_samples(
     negative_samples = np.array(negative_samples)   # (n, dim)
     samples = np.concatenate([positive_samples, negative_samples], axis=0)
     labels = np.concatenate(
-        [np.ones(positive_samples.shape[0]), np.zeros(negative_samples.shape[0])],
+        [np.ones(positive_samples.shape[0], dtype=np.int8),
+         np.zeros(negative_samples.shape[0], dtype=np.int8)],
         axis=0)
 
     return samples, labels
@@ -292,11 +342,11 @@ def get_clustering_samples(
         raw_data: RawEDF, seizure_times: List[Tuple[int, int]],
         selected_channels: Optional[List[str]]=None,
         seed: int=2025,
-        window_width: float=5.0, overlap: float=1.0,
-        preictal_interval: float=600.,
+        window_width: float=5.0, overlap: float=0.0,
+        preictal_interval: float=300.,
         preictal_width: Optional[float]=None,
-        random_samples: int = 500
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        random_samples: int = 100
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Extract samples for clustering from the long series
     of RawEDF object using sliding windows.
@@ -325,12 +375,12 @@ def get_clustering_samples(
     preictal_interval : float, optional
         The time interval before onset time from which to
         take the preictal samples (in seconds) \n
-        Default is 600 s (10 minutes)
+        Default is 300 s (5 minutes)
     preictal_width : float, optioanl
         If given, the window width of preictal stage
         will be taken as this value. Otherwise,
         it is the same as the other windows.
-    random_samples : int, optional, default=500
+    random_samples : int, optional, default=100
         The number of random segments to sample from
         the time series outside preictal periods.
 
@@ -338,9 +388,9 @@ def get_clustering_samples(
     -------
     samples : numpy.ndarray
         Array of shape
-        [n_samples, n_channels, window_width]
+        (n_samples, n_channels, window_width)
         containing the EEG samples
-    dists_to_seizure : np.ndarray
+    dists_to_seizure : numpy.ndarray
         1 dimensional array of same length as n_samples,
         each value (integer) represents the distance
         to the closest seizure period
@@ -348,11 +398,18 @@ def get_clustering_samples(
         Positive distance: preictal,
         negative distance: postictal,
         nan: no seizure in the file.
+    flags : numpy.ndarray
+        of shape (n_samples,). \n
+        Each entry indicates whether the sample
+        is taken before a seizure (1)
+        or randomly taken (0)
     """
     random.seed(seed)
+    np.random.seed(seed)
 
     samples = []
     dists_to_seizure = []
+    flags = []
 
     sfreq = raw_data.info['sfreq']
 
@@ -370,24 +427,28 @@ def get_clustering_samples(
             prev_end = 0
 
         # slide windows backwards
-        sample_start = seizure_start - int(preictal_width * sfreq)
-        while sample_start > seizure_start - int(preictal_interval * sfreq):
-            if sample_start < prev_end:
-                warnings.warn(
+        width = int(preictal_width * sfreq)
+        hop_length = int((preictal_width - overlap) * sfreq)
+        lower_limit = seizure_start - int(preictal_interval * sfreq)
+        if lower_limit < prev_end:
+            warnings.warn(
                     "Not enough temporal length in the interictal stage. "
                     f"Requested: {preictal_interval}s, available: "
                     f"{(seizure_start - prev_end) / sfreq:.4f}s"
                 )
-                break
+            lower_limit = prev_end
 
-            sample_end = sample_start + int(preictal_width * sfreq)
-            sample = raw_data_selected.get_data(
-                start=sample_start, stop=sample_end)
-            samples.append(sample)
-            dists_to_seizure.append(seizure_start-sample_end)
-            sample_start -= int((preictal_width - overlap) * sfreq)
+        samples_i, dists_i = sliding_window(
+            raw_data_selected, width, hop_length,
+            start=seizure_start, end=lower_limit)
+    
+        samples.extend(samples_i)
+        dists_to_seizure.extend(dists_i)
         
         prev_end = seizure_end
+
+    n_onset = len(samples)
+    flags1 = np.ones(n_onset, dtype=np.int8)
     
     # Add random intervals
     total_samples = len(raw_data_selected)
@@ -408,5 +469,43 @@ def get_clustering_samples(
                 dist = distance_to_closest_seizure(
                     (sample_start, sample_end), seizure_times)
             dists_to_seizure.append(dist)
+
+    flags0 = np.zeros(len(samples) - n_onset, dtype=np.int8)
+    flags = np.concatenate((flags1, flags0))
     
-    return np.array(samples), np.array(dists_to_seizure)
+    return np.array(samples), np.array(dists_to_seizure), flags
+
+def sliding_window(
+        raw_data_selected: RawEDF,
+        window_width: int, window_hop_length: int,
+        start: int, end: int,
+        preictal: bool=True
+    ):
+    """
+    Create sliding windows from start to end
+    (sliding backwards)
+    """
+    if end > start:
+        raise ValueError(
+            'This is a backward sliding function, '
+            'start must be larger than end.'
+        )
+
+    samples = []
+    dists = []
+    sample_start = start - window_width
+    while sample_start > end:
+        sample_end = sample_start + window_width
+        sample = raw_data_selected.get_data(
+                start=sample_start, stop=sample_end)
+        samples.append(sample)
+
+        # calculate distance to seizures
+        if preictal:
+            dists.append(start-sample_end)
+        else:
+            dists.append(np.inf)
+
+        sample_start -= window_hop_length
+    
+    return samples, dists

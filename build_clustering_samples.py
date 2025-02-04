@@ -70,3 +70,5 @@ if __name__ == '__main__':
                     window_width=width, overlap=overlap,
                     preictal_interval=args.preictal_interval,
                     random_samples=args.random_samples)
+            else:
+                print(f'Sample file already exists: {file_path}')

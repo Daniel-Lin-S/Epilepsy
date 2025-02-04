@@ -1,13 +1,13 @@
 from data_loader import build_samples, read_samples
-from utils.tools import load_set_from_file
+from utils.tools import load_set_from_file, get_patients_with_seizures
 from utils.preprocess import read_sampling_rate
 from utils.channel_selection import find_significant_channels
 from models.clustering import SeizureClustering
 
 from sklearn.cluster import AgglomerativeClustering
-import math
 import os
 import argparse
+import numpy as np
 
 
 parser = argparse.ArgumentParser(description="Run clustering model.")
@@ -87,38 +87,53 @@ if __name__ == '__main__':
         clustering.fit(feature_file=feature_file)
     else:
         if os.path.exists(sample_file):
-            samples, dists = read_samples(sample_file)
+            sample_dict = read_samples(sample_file, samples_only=False)
         else:
-            samples, dists = build_samples(
+            sample_dict = build_samples(
                 args.data_folder, selected_channels=selected_channels,
-                mode='clustering',
+                mode='clustering', output_file=sample_file,
                 window_width=args.window_width, overlap=args.overlap,
                 preictal_interval=args.preictal_interval,
                 random_samples=args.random_samples)
- 
-        clustering.fit(samples, dists, feature_file=feature_file)
 
-    figure_folder = f'figures/clustering-k[{args.n_clusters}]-nica[{args.n_ica}]'
+        clustering.fit(sample_dict['x'], sample_dict,
+                    feature_file=feature_file)
+
+    figure_folder = (f'figures/clustering-{sample_configs}-k[{args.n_clusters}]'
+                     f'-nica[{args.n_ica}]'
+                     )
 
     if not os.path.exists(figure_folder):
         os.makedirs(figure_folder)
 
     clustering.plot_clusters(
-        file_path=os.path.join(figure_folder, 'tsne.png'))
+        file_path=os.path.join(figure_folder, f'tsne.png'))
     clustering.visualize_cluster_distances(
-        file_path=os.path.join(figure_folder, 'cluster_dist.png'))
+        file_path=os.path.join(figure_folder, f'cluster_dist.png'))
     cluster_sizes = clustering.get_cluster_sizes()
 
-    # plot the histogram for the smallest class
-    minor_size = math.inf
-    minor_class = None
+    # minimum size of a cluster to be considered as not noise
+    min_cluster_size = 5
+
+    # search for major and minor classes
+    major_size = 0
+    major_class = None
 
     for label, size in cluster_sizes.items():
-        if size < minor_size and label != -1:
-            minor_size = size
-            minor_class = label
+        if size > major_size and label != -1:
+            major_size = size
+            major_class = label
 
-    if minor_class:
+    if major_class is not None:
+        # collect minor classes
+        minor_classes = []
+        for index, size in cluster_sizes.items():
+            if index != major_class and size >= min_cluster_size:
+                minor_classes.append(index)
+
+        for index in minor_classes:
+            clustering.evaluate_cluster(index)
+
         clustering.plot_histogram_dists(
-            minor_class, bins=100,
-            file_path=os.path.join(figure_folder, 'hist_dist.png'))
+            minor_classes, bins=100,
+            file_path=os.path.join(figure_folder, 'hist_dist.png')) 
