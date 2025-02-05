@@ -9,8 +9,7 @@ FEATURE_PATH="$FEATURE_REPO/$SAMPLE_NAME-timefreq[$TF_METHOD].h5"
 
 [ ! -d "$FEATURE_REPO" ] && mkdir "$FEATURE_REPO"
 
-# python extract_features.py \
-# --sample_file $SAMPLE_PATH \
-# --feature_file $FEATURE_PATH \
-# --timefreq_method $TF_METHOD \
-
+python extract_features.py \
+--sample_file $SAMPLE_PATH \
+--feature_file $FEATURE_PATH \
+--timefreq_method $TF_METHOD
