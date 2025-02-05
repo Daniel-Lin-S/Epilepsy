@@ -1,7 +1,9 @@
 #!/bin/bash
 
 PATIENT_ID="DA001023"
-SAMPLE_NAME="width[5.0]-overlap[2.5]-preictal[3600.0]-nrand[1000]"
+PREICTAL=1800.0
+NRAND=500
+SAMPLE_NAME="width[5.0]-overlap[2.5]-preictal[$PREICTAL]-nrand[$NRAND]"
 SAMPLE_PATH="./samples/clustering/$PATIENT_ID/$SAMPLE_NAME.h5"
 TF_METHOD='cwt'
 FEATURE_REPO="./samples/timefreq/$PATIENT_ID"
