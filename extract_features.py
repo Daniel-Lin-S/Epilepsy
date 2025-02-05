@@ -1,5 +1,5 @@
 from utils.feature_extraction import extract_features_timefreq
-from data_loader import read_samples
+from utils.data_loader import read_samples
 from utils.preprocess import read_sampling_rate
 
 import argparse

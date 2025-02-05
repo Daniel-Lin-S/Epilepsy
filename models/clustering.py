@@ -108,13 +108,13 @@ class SeizureClustering:
                 self.features = f['features'][:]
 
                 for key in f.keys():
-                    if key != 'features':
+                    if key == 'y' or key == 'dist':
+                        self.features_meta['distances'] = f[key][:]
+                    elif key != 'features':
                         self.features_meta[key] = f[key][:]
-            # features_meta = read_samples(feature_file, samples_only=False)
-            # del features_meta['features']
-            # self.features_meta = features_meta
 
         elif samples is not None:
+            print('Extracting features ...')
             self.features = extract_features_timefreq(
                 samples, self.sfreq, self.timefreq_method, self.n_jobs)
             if sample_dict:  # record meta information
@@ -129,14 +129,7 @@ class SeizureClustering:
                     f.create_dataset('features', data=self.features)
                     for key, item in self.features_meta.items():
                         f.create_dataset(key, data=item)
-            
-            # change binary strings to strings
-            # for key in self.features_meta.keys():
-            #     dataset = self.features_meta[key]
-            #     if dataset.dtype.type is np.bytes_:
-            #         dataset = [s.decode('utf-8') for s in dataset]
 
-            #     self.features_meta[key] = dataset
         else:
             raise Exception(
                 'samples must be provided '
@@ -265,7 +258,15 @@ class SeizureClustering:
         Return distances to seizure of samples under this cluster
         """
         cluster_indices = np.where(self.labels == cluster_id)[0]
-        return self.features_meta['distances'][cluster_indices]
+        if 'distances' in self.features_meta:
+            dists = self.features_meta['distances']
+        else:
+            print(f"Keys in features_meta: {self.features_meta.keys()}")
+            raise ValueError(
+                "Distances must be set before visualizing."
+                )
+
+        return dists[cluster_indices]
 
     def plot_clusters(self, file_path: Optional[str]=None) -> None:
         """
@@ -398,17 +399,25 @@ class SeizureClustering:
         will be replaced with a value larger than the
         maximum distance for visualisation.
         """
-        if self.labels is None or 'distances' not in self.features_meta:
+        if self.labels is None:
             raise ValueError(
-                "Labels and distances must be set before visualizing."
+                "Labels must be set before visualizing."
                 "run `fit` or `predict` before running this function"
                 )
 
+        if 'distances' in self.features_meta:
+            dists = self.features_meta['distances']
+        else:
+            print(f"Keys in features_meta: {self.features_meta.keys()}")
+            raise ValueError(
+                "Distances must be set before visualizing."
+                )
+
         max_distance = np.nanmax(
-            self.features_meta['distances'][~np.isinf(self.features_meta['distances'])])
+            dists[~np.isinf(dists)])
         dists_visual = np.where(
-            np.isinf(self.features_meta['distances']),
-            2*max_distance, self.features_meta['distances'])
+            np.isinf(dists),
+            2*max_distance, dists)
 
         plt.figure(figsize=(10, 6))
         plt.scatter(self.labels, dists_visual)
@@ -514,11 +523,18 @@ class SeizureClustering:
         if cluster_id not in np.unique(self.labels):
             raise ValueError(f"Cluster ID {cluster_id} not found in labels.")
         if self.labels is None or (
-            'distances' not in self.features_meta) or (
                 'preictal_flag' not in self.features_meta):
             raise ValueError(
                 "Labels and distances must be set before visualizing."
                 "run `fit` or `predict` before running this function"
+                )
+        
+        if 'distances' in self.features_meta:
+            dists = self.features_meta['distances']
+        else:
+            print(f"Keys in features_meta: {self.features_meta.keys()}")
+            raise ValueError(
+                "Distances must be set before visualizing."
                 )
         
         # Initialise variables for counting and analysis
@@ -535,7 +551,7 @@ class SeizureClustering:
                     start_idx = i  # Start a new segment
             elif flag == 0 and start_idx is not None: # end of segment
                 segment_labels = self.labels[start_idx:i]
-                segment_dists = self.features_meta['distances'][start_idx:i]
+                segment_dists = dists[start_idx:i]
 
                 cluster_count = np.sum(segment_labels == cluster_id)
                 cluster_counts.append(cluster_count)
@@ -551,7 +567,7 @@ class SeizureClustering:
         # Handle edge case: last segment if it ends at the last index
         if start_idx is not None:
             segment_labels = self.labels[start_idx:]
-            segment_dists = self.features_meta['distances'][start_idx:]
+            segment_dists = dists[start_idx:]
             
             cluster_count = np.sum(segment_labels == cluster_id)
             cluster_counts.append(cluster_count)

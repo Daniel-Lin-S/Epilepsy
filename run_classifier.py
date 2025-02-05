@@ -1,4 +1,4 @@
-from data_loader import read_samples
+from utils.data_loader import read_samples
 from models.classifiers import classifier_timefreq
 import argparse
 import os
@@ -8,7 +8,7 @@ from utils.tools import (
 )
 from utils.preprocess import read_sampling_rate
 from utils.channel_selection import find_significant_channels
-from data_loader import build_samples
+from utils.data_loader import build_samples
 
 
 parser = argparse.ArgumentParser(description='Train Random Forest for seizure prediction')

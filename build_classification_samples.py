@@ -1,4 +1,4 @@
-from data_loader import build_samples
+from utils.data_loader import build_samples
 from utils.tools import load_set_from_file
 from utils.channel_selection import find_significant_channels
 

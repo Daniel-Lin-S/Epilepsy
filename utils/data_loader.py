@@ -18,6 +18,7 @@ def build_samples(
         selected_channels: Optional[List[str]]=None,
         seed: int=2025,
         verbose: bool=True, mode: str='classification',
+        patient_id: Optional[str]=None,
         **kwargs) -> dict:
     """    
     Obtain positive (ictal) and negative (non-ictal) samples from EEG signals
@@ -87,13 +88,16 @@ def build_samples(
                 if verbose:
                     print(f'Processing {file}')
                 flag = False
-                patient_id = os.path.splitext(file)[0]
+                file_id = os.path.splitext(file)[0]
+                if patient_id is not None and patient_id not in file_id:
+                    continue
+
                 edf_file_path = os.path.join(root, file)
 
                 raw_data = mne.io.read_raw_edf(
                     edf_file_path, preload=False, verbose=False)
 
-                seizure_file = os.path.join(root, f"{patient_id}.edf.seizures")
+                seizure_file = os.path.join(root, f"{file_id}.edf.seizures")
                 if not os.path.exists(seizure_file):
                     raise FileNotFoundError(
                         'Cannot find seizure time stamps '
@@ -107,12 +111,12 @@ def build_samples(
                         raw_data, seizure_times, selected_channels, seed, **kwargs)
                     flags = ind_labels
                     n_samples = ind_samples.shape[0]
-                    id_marks = [patient_id] * n_samples
+                    id_marks = [file_id] * n_samples
                 elif mode == 'clustering':
                     ind_samples, ind_labels, flags = get_clustering_samples(
                         raw_data, seizure_times, selected_channels, seed, **kwargs)
                     n_samples = ind_samples.shape[0]
-                    id_marks = [patient_id] * n_samples
+                    id_marks = [file_id] * n_samples
                 else:
                     raise ValueError(
                         'Unsupported mode, must be one of [classification, clustering].'

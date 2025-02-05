@@ -45,13 +45,17 @@ def load_raw_data(folder_path: str, patient_id: str,
     FileNotFoundError
         if the patient's edf file does not exist.
     """
-    file_path = os.path.join(folder_path, f'{patient_id}.edf')
+    file_path = None
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith('.edf') and patient_id in file:
+                file_path = os.path.join(root, file)
+                break
+    if file_path is None:
+        raise FileNotFoundError(
+            f"Corresponding EDF file not found for patient_id: {patient_id}")
 
     # check existence of edf file
-    if not os.path.isfile(file_path):
-        raise FileNotFoundError(
-            f"Corresponding EDF file not found: {file_path}")
-
     raw = read_raw_edf(file_path, preload=preload, verbose=False)
 
     return raw
