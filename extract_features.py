@@ -34,7 +34,8 @@ if __name__ == '__main__':
 
     features = extract_features_timefreq(
         x=sample_dict['x'], sfreq=sfreq,
-        timefreq_method=args.timefreq_method, n_jobs=args.n_jobs)
+        timefreq_method=args.timefreq_method,
+        n_jobs=args.n_jobs)
     
     with h5py.File(args.feature_file, 'w') as f:
         f.create_dataset('features', data=features)

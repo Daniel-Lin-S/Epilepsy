@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.stats import skew, kurtosis
-from typing import Dict, Union
+from typing import Dict, Union, Tuple
 import neurokit2 as nk
 import os
 from tqdm import tqdm
@@ -72,6 +72,7 @@ def extract_features_timefreq(
 
     return np.array(all_features)
 
+
 def _process_sample(
         i: int, x: np.ndarray, n_channels: int,
         sfreq: int, timefreq_method: str
@@ -95,6 +96,48 @@ def _process_sample(
         sample_features.append(features.flatten())
 
     return np.concatenate(sample_features)
+
+
+def complexity_hjorth_batch(
+        signals: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    This function computes the complexity and
+    mobility for multiple frequency channels at once.
+    
+    Parameters:
+    -----------
+    signals : np.ndarray
+        2D array of shape (n_frequencies, n_time_stamps).
+        (should be a slice of a time-frequency graph) \n
+    
+    Returns:
+    --------
+    complexities : np.ndarray
+        Array of complexity values for each frequency
+        (shape: n_frequencies).
+    mobilities : np.ndarray
+        Array of mobility values for each frequency
+        (shape: n_frequencies).
+
+    References
+    ----------
+    * Hjorth, B (1970) EEG Analysis Based on Time Domain Properties. Electroencephalography and
+      Clinical Neurophysiology, 29, 306-310.
+    """
+    # First and second derivatives along the time axis (axis=1)
+    dx = np.diff(signals, axis=1)
+    ddx = np.diff(dx, axis=1)
+    
+    # variance of signal and its derivatives along each frequency channel
+    x_var = np.var(signals, axis=1)
+    dx_var = np.var(dx, axis=1)
+    ddx_var = np.var(ddx, axis=1)
+
+    mobilities = np.sqrt(dx_var / x_var)
+    complexities = np.sqrt(ddx_var / dx_var) / mobilities
+    
+    return complexities, mobilities
 
 
 def timefreq_summary_features(
@@ -166,20 +209,13 @@ def timefreq_summary_features(
         # Compute the summary features
         mav = np.mean(np.abs(band_data), axis=1)  # Mean absolute value
         std = np.std(band_data, axis=1)  # Standard deviation
+        rms = np.sqrt(np.mean(np.square(band_data), axis=1))  # Root mean square
         skewness = skew(band_data, axis=1, nan_policy='omit')
         kurt = kurtosis(band_data, axis=1, nan_policy='omit')
-        rms = np.sqrt(np.mean(np.square(band_data), axis=1))  # Root mean square
-
-        # compute complexity and mobility
-        complexities = []
-        mobilities = []
-        for c in range(band_data.shape[0]):
-            complexity, act_dict = nk.complexity_hjorth(band_data[c, :])
-            complexities.append(complexity)
-            mobilities.append(act_dict["Mobility"])
+        complexities, mobilities = complexity_hjorth_batch(band_data)
 
         # Compute MAV ratio with previous band
-        if i > 0:
+        if i > 0: 
             prev_band = band_names[i-1]
             prev_band_mav = np.mean(np.abs(segmented_timefreq[prev_band]))
             mav_ratio = np.mean(mav) / prev_band_mav
