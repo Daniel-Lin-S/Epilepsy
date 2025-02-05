@@ -319,9 +319,9 @@ class SeizureClustering:
             [f"Cluster {label}" for label in unique_labels],
             title="Clusters", loc='best')
 
-        plt.title(f"tSNE Clustering Visualisation")
-        plt.xlabel("t-SNE Component 1")
-        plt.ylabel("t-SNE Component 2")
+        plt.title(f"tSNE Clustering Visualisation", fontsize=20)
+        plt.xlabel("t-SNE Component 1", fontsize=16)
+        plt.ylabel("t-SNE Component 2", fontsize=16)
 
         if file_path:
             plt.savefig(file_path, dpi=300)
@@ -370,9 +370,9 @@ class SeizureClustering:
 
         # Plot the k-distance graph
         plt.plot(distances)
-        plt.xlabel('Points')
-        plt.ylabel(f'Distance to {n_neighbors}th nearest neighbor')
-        plt.title('k-distance Graph')
+        plt.xlabel('Points', fontsize=16)
+        plt.ylabel(f'Distance to {n_neighbors}th nearest neighbor', fontsize=16)
+        plt.title('k-distance Graph', fontsize=20)
 
         if file_path:
             plt.savefig(file_path)
@@ -413,8 +413,16 @@ class SeizureClustering:
                 "Distances must be set before visualizing."
                 )
 
-        max_distance = np.nanmax(
-            dists[~np.isinf(dists)])
+        valid_dists = dists[~np.isinf(dists)]
+        if len(valid_dists) > 0:
+            max_distance = np.nanmax(valid_dists)
+        else:
+            warnings.warn(
+                'None of self.dists is finite. '
+                'Histogram will not be plotted.'
+            )
+            return
+
         dists_visual = np.where(
             np.isinf(dists),
             2*max_distance, dists)
@@ -423,9 +431,9 @@ class SeizureClustering:
         plt.scatter(self.labels, dists_visual)
 
         # Labeling
-        plt.title('Cluster Labels vs. Distance to Closest Seizure Period')
-        plt.xlabel('Cluster Labels')
-        plt.ylabel('Distance to Closest Seizure Period')
+        plt.title('Cluster Labels vs. Distance to Closest Seizure Period', fontsize=20)
+        plt.xlabel('Cluster Labels', fontsize=16)
+        plt.ylabel('Distance to Closest Seizure Period', fontsize=16)
 
         if file_path:
             plt.savefig(file_path)
@@ -477,6 +485,11 @@ class SeizureClustering:
                     "Please provide a valid cluster ID.")
 
             dists_in_cluster = self.get_cluster_dists(cluster_id)
+
+            # check if all distances are inf
+            if np.all(np.isinf(dists_in_cluster)):
+                continue
+
             valid_dists = dists_in_cluster[np.isfinite(dists_in_cluster)]
 
             all_valid_dists.extend(valid_dists)
@@ -487,12 +500,19 @@ class SeizureClustering:
                 )
 
         # Plot the histogram
+        if len(all_valid_dists) == 0:
+            warnings.warn(
+                'None of the distances are finite. '
+                'Histogram will not be plotted.'
+            )
+            return
+
         plt.figure(figsize=(8, 6))
         plt.hist(all_valid_dists, bins=bins, color='skyblue', edgecolor='black')
         plt.title("Histogram of Distances to Seizure Periods"+ "\n" +
-                  f"for Clusters {cluster_ids}")
-        plt.xlabel("Distance to Seizure (s)")
-        plt.ylabel("Frequency")
+                  f"for Clusters {cluster_ids}", fontsize=20)
+        plt.xlabel("Distance to Seizure (s)", fontsize=16)
+        plt.ylabel("Frequency", fontsize=16)
         plt.grid(True)
 
         if file_path:
@@ -502,7 +522,59 @@ class SeizureClustering:
         else:
             plt.show()
 
-    def evaluate_cluster(self, cluster_id: int):
+    def evaluate_clusters(self):
+        if self.labels is None:
+            raise ValueError("Labels have not been computed yet.")
+
+        if self.features is None:
+            raise ValueError("Features have not been extracted yet.")
+
+        unique_labels = np.unique(self.labels)
+        num_clusters = len(unique_labels)
+
+        within_distances = []
+        between_distances = []
+
+        for i in range(num_clusters):
+            cluster_indices = np.where(self.labels == unique_labels[i])[0]
+            cluster_features = self.features[cluster_indices]
+
+            # Calculate within-cluster distance
+            cluster_distance = np.mean(
+                np.linalg.norm(
+                    cluster_features - np.mean(cluster_features, axis=0), axis=1
+                )
+            )
+            within_distances.append(cluster_distance)
+
+            # Calculate between-cluster distance
+            # by averaging the distance between the cluster centroid
+            # and the centroid of all other clusters (combined)
+            other_clusters_indices = np.where(self.labels != unique_labels[i])[0]
+            other_clusters_features = self.features[other_clusters_indices]
+            between_cluster_distance = np.mean(
+                np.linalg.norm(
+                    cluster_features - np.mean(other_clusters_features, axis=0),
+                    axis=1
+                )
+            )
+            between_distances.append(between_cluster_distance)
+
+        # Calculate other metrics
+        mean_within_distance = np.mean(within_distances)
+        mean_between_distance = np.mean(between_distances)
+        separation_index = mean_between_distance / mean_within_distance
+
+        # Print evaluation metrics
+        print("Cluster Distance Evaluation:")
+        print(f"Number of clusters: {num_clusters}")
+        print(f"Within-cluster distances: {within_distances}")
+        print(f"Between-cluster distances: {between_distances}")
+        print(f"Average within-cluster distance: {mean_within_distance}")
+        print(f"Average between-cluster distance: {mean_between_distance}")
+        print(f"Separation index: {separation_index}")
+
+    def cluster_seizure_comparison(self, cluster_id: int):
         """
         Analyses the presence of given cluster index (or indices)
         in each pre-ictal segment.

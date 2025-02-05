@@ -113,7 +113,7 @@ if __name__ == '__main__':
         model = DBSCAN()
     elif args.model == 'gmm':
         model = GaussianMixture(
-            n_components=args.n_clusters, covariance_type='diag',
+            n_components=args.n_clusters,
             random_state=2025)
     else:
         raise ValueError("Invalid model name. Must be one of ['agglo', 'kmeans',"
@@ -158,16 +158,19 @@ if __name__ == '__main__':
         file_path=os.path.join(figure_folder, f'tsne.png'))
     clustering.visualize_cluster_distances(
         file_path=os.path.join(figure_folder, f'cluster_dist.png'))
+    clustering.evaluate_clusters()
+
     cluster_sizes = clustering.get_cluster_sizes()
 
     # minimum and maximum size of a cluster to be
     # considered as a seizure-related cluster
-    min_cluster_size = 5
     if args.patient_id is None:
         # more allowance for clustering of all patients
         max_cluster_size = 200
+        min_cluster_size = 11
     else:
         max_cluster_size = 100
+        min_cluster_size = 6
 
     # search for major and minor classes
     major_size = 0
@@ -187,9 +190,9 @@ if __name__ == '__main__':
                 minor_classes.append(index)
 
         if args.patient_id is None:
-            # check presence of each cluster for each seizure
+            # check presence of minor clusters for each seizure
             for index in minor_classes:
-                clustering.evaluate_cluster(index)
+                clustering.cluster_seizure_comparison(index)
 
         if len(minor_classes) > 0:
             clustering.plot_histogram_dists(

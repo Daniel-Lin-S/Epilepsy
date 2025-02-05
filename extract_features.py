@@ -22,7 +22,8 @@ parser.add_argument('--summary_file', type=str, default='./dataset/summary.txt',
 parser.add_argument('--timefreq_method', type=str, default='cwt',
                     help="The method used to generate time-frequency graph")
 parser.add_argument('--n_jobs', type=int, default=-1,
-                    help="Number of parallel processors used to extract features")
+                    help="Number of parallel processors used to extract features"
+                    "Default: -1, use all available processors")
 
 if __name__ == '__main__':
     args = parser.parse_args()
