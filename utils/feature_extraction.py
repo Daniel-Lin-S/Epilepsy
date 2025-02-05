@@ -5,11 +5,13 @@ import neurokit2 as nk
 import os
 from tqdm import tqdm
 from multiprocessing import Pool
+import warnings
 
 
 def extract_features_timefreq(
     x: np.ndarray, sfreq: int,
-    timefreq_method: str, n_jobs: int
+    timefreq_method: str, n_freqs: int=250,
+    n_jobs: int=-1
 ) -> np.ndarray:
     """
     Extract time-frequency graph summary statistics, processed in parallel. \n
@@ -36,6 +38,9 @@ def extract_features_timefreq(
     timefreq_method : str
         the method used to turn x into time-frequency graph.
         one of stft, cwt, wvd, pwvd
+    n_freqs : int
+        the number of frequency channels to extract. \n
+        Detemines the frequency resolution of the time-frequency graph.
     n_jobs : int
         number of parallel processors used to convert the
         samples.
@@ -45,14 +50,14 @@ def extract_features_timefreq(
     features : np.ndarray
         of shape (samples, n_features)
     """
-    n_samples, n_channels, _ = x.shape
+    n_samples = x.shape[0]
     # store features from all channels
     all_features = []
 
     if n_jobs == -1:
         n_jobs = os.cpu_count()
 
-    args = [(i, x, n_channels, sfreq, timefreq_method)
+    args = [(i, x, sfreq, timefreq_method, n_freqs)
             for i in range(n_samples)]
 
     with Pool(processes=n_jobs) as pool:
@@ -74,26 +79,40 @@ def extract_features_timefreq(
 
 
 def _process_sample(
-        i: int, x: np.ndarray, n_channels: int,
-        sfreq: int, timefreq_method: str
+        i: int, x: np.ndarray,
+        sfreq: int, timefreq_method: str,
+        n_freqs: int
     ) -> np.ndarray:
     """
     Process a single sample (patient) to extract its features.
     """
     sample_features = []
+    x_timefreq = []
+
+    if n_freqs > sfreq // 2:
+        n_freqs = sfreq // 2
+        warnings.warn(
+            'The number of frequency channels must be less than half '
+            'the sampling frequency (Nyquist limit), got:', n_freqs, 
+            ' setting to upper limit: ', sfreq // 2
+        )
     
-    for c in range(n_channels):
-        # Perform time-frequency decomposition
-        freqs, _, x_timefreq = nk.signal_timefrequency(
+    # Extract time-frequency graph for each channel
+    for c in range(x.shape[1]):
+        freqs, _, x_tf = nk.signal_timefrequency(
             x[i, c, :], sampling_rate=sfreq,
             method=timefreq_method,
             min_frequency=1., max_frequency=80.,
+            nfreqbin=n_freqs,
             show=False
         )
+
+        x_timefreq.append(x_tf)
         
-        # Extract summary statistics
-        features = timefreq_summary_features(x_timefreq, freqs, labels=False)
-        sample_features.append(features.flatten())
+    # Extract summary statistics
+    x_timefreq = np.array(x_timefreq)  # shape: (n_channels, n_freqs, length)
+    features = timefreq_summary_features(x_timefreq, freqs, labels=False)
+    sample_features.append(features.flatten())
 
     return np.concatenate(sample_features)
 
@@ -108,31 +127,31 @@ def complexity_hjorth_batch(
     Parameters:
     -----------
     signals : np.ndarray
-        2D array of shape (n_frequencies, n_time_stamps).
+        3D array of shape (n_channels, n_frequencies, n_time_stamps).
         (should be a slice of a time-frequency graph) \n
     
     Returns:
     --------
     complexities : np.ndarray
         Array of complexity values for each frequency
-        (shape: n_frequencies).
+        (shape: n_channels, n_frequencies).
     mobilities : np.ndarray
         Array of mobility values for each frequency
-        (shape: n_frequencies).
+        (shape: n_channels, n_frequencies).
 
     References
     ----------
-    * Hjorth, B (1970) EEG Analysis Based on Time Domain Properties. Electroencephalography and
-      Clinical Neurophysiology, 29, 306-310.
+    - Hjorth, B (1970) EEG Analysis Based on Time Domain Properties.
+      Electroencephalography and Clinical Neurophysiology, 29, 306-310.
     """
-    # First and second derivatives along the time axis (axis=1)
-    dx = np.diff(signals, axis=1)
-    ddx = np.diff(dx, axis=1)
+    # First and second derivatives along the time axis
+    dx = np.diff(signals, axis=2)
+    ddx = np.diff(dx, axis=2)
     
     # variance of signal and its derivatives along each frequency channel
-    x_var = np.var(signals, axis=1)
-    dx_var = np.var(dx, axis=1)
-    ddx_var = np.var(ddx, axis=1)
+    x_var = np.var(signals, axis=2)
+    dx_var = np.var(dx, axis=2)
+    ddx_var = np.var(ddx, axis=2)
 
     mobilities = np.sqrt(dx_var / x_var)
     complexities = np.sqrt(ddx_var / dx_var) / mobilities
@@ -171,7 +190,7 @@ def timefreq_summary_features(
     Parameters
     ----------
     x_timefreq : np.ndarray
-        The timefreq transformed signal with shape (n_freqs, length),
+        The timefreq transformed signal with shape (n_channels, n_freqs, length),
         where n_freqs is the number of frequency channels.
     freqs : np.ndarray
         The array of frequencies (in Hz) corresponding to
@@ -207,29 +226,32 @@ def timefreq_summary_features(
         band_data = segmented_timefreq[band]
         
         # Compute the summary features
-        mav = np.mean(np.abs(band_data), axis=1)  # Mean absolute value
-        std = np.std(band_data, axis=1)  # Standard deviation
-        rms = np.sqrt(np.mean(np.square(band_data), axis=1))  # Root mean square
-        skewness = skew(band_data, axis=1, nan_policy='omit')
-        kurt = kurtosis(band_data, axis=1, nan_policy='omit')
+        mav = np.mean(np.abs(band_data), axis=2)  # Mean absolute value
+        mean_mav = np.mean(mav, axis=1)  # averaged across frequencies
+        std = np.std(band_data, axis=2)  # Standard deviation
+        rms = np.sqrt(np.mean(np.square(band_data), axis=2))  # Root mean square
+        skewness = skew(band_data, axis=2, nan_policy='omit')
+        kurt = kurtosis(band_data, axis=2, nan_policy='omit')
         complexities, mobilities = complexity_hjorth_batch(band_data)
 
         # Compute MAV ratio with previous band
         if i > 0: 
             prev_band = band_names[i-1]
-            prev_band_mav = np.mean(np.abs(segmented_timefreq[prev_band]))
-            mav_ratio = np.mean(mav) / prev_band_mav
+            prev_band_mav = np.mean(np.abs(segmented_timefreq[prev_band]), axis=2)
+            prev_band_mean_mav = np.mean(prev_band_mav, axis=1)
+            mav_ratio = mean_mav / prev_band_mean_mav
         else:
             mav_ratio = np.nan  # No previous band for first frequency band
 
+        # note: each entry is a 1D array of shape (n_channels, )
         features[band] = {
-            "mav": np.mean(mav),
-            "std": np.mean(std),
-            "skewness": np.mean(skewness),
-            "kurtosis": np.mean(kurt),
-            "rms": np.mean(rms),
-            "mobility": np.mean(mobilities),
-            "complexity": np.mean(complexities),
+            "mav": mean_mav,
+            "std": np.mean(std, axis=1),
+            "skewness": np.mean(skewness, axis=1),
+            "kurtosis": np.mean(kurt, axis=1),
+            "rms": np.mean(rms, axis=1),
+            "mobility": np.mean(mobilities, axis=1),
+            "complexity": np.mean(complexities, axis=1),
             "mav_ratio": mav_ratio
         }
     
@@ -240,7 +262,7 @@ def timefreq_summary_features(
 
 
 def _nest_dict_to_numpy_array(
-        features_dict: Dict[str, Dict[str, float]]
+        features_dict: Dict[str, Dict[str, Union[float, np.ndarray]]]
     ) -> np.ndarray:
     """
     Converts the nested dictionary (output of `timefreq_summary_features`)
@@ -248,8 +270,10 @@ def _nest_dict_to_numpy_array(
 
     Parameters
     ----------
-    features_dict : Dict[str, Dict[str, float]]
+    features_dict : Dict[str, Dict[str, Union[float, np.ndarray]]]
         A nested dictionary.
+        Where the values in the inner dictionary are
+        numpy arrays or floats.
 
     Returns
     -------
@@ -261,10 +285,18 @@ def _nest_dict_to_numpy_array(
 
     for _, inner_dict in features_dict.items():
         for key, value in inner_dict.items():
-            if isinstance(value, np.ndarray) and value.ndim > 0:
-                print(f'{key} shape: {value.shape}')
-            if not np.isnan(value):
+            if isinstance(value, np.ndarray):
+                all_features.extend(value)
+            elif isinstance(value, float) and not np.isnan(value):
+                print('key:', key, 'value:', value)
                 all_features.append(value)
+            elif np.isnan(value):
+                pass  # not store NaN values
+            else:
+                raise ValueError(
+                    'Each value in the inner dictionary must '
+                    'be a numpy array or float, got:', type(value)
+                )
 
     return np.array(all_features)
 
@@ -283,7 +315,7 @@ def _segment_timefreq_bands(
     Parameters
     ----------
     x_timefreq : np.ndarray
-        The timefreq transformed signal with shape (n_freqs, length),
+        The timefreq transformed signal with shape (n_channels, n_freqs, length),
         where n_freqs is the number of frequency channels.
     
     freqs : np.ndarray
@@ -313,6 +345,6 @@ def _segment_timefreq_bands(
     for band, (low, high) in freq_bands.items():
         indices = np.where((freqs >= low) & (freqs <= high))[0]
 
-        segmented_data[band] = x_timefreq[indices, :]
+        segmented_data[band] = x_timefreq[:, indices, :]
         
     return segmented_data
