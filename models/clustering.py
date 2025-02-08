@@ -3,15 +3,16 @@ from sklearn.base import ClusterMixin
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.manifold import TSNE
-from sklearn.neighbors import NearestNeighbors
 from sklearn.decomposition import FastICA
+from scipy.spatial.distance import cdist
 import matplotlib.pyplot as plt
-from typing import Optional, List
+from typing import Optional, List, Union, Dict
 import os
 import h5py
 import warnings
 
 from utils.feature_extraction import extract_features_timefreq
+from layers.normaliser import BatchNormaliser
 
 
 class SeizureClustering:
@@ -22,7 +23,7 @@ class SeizureClustering:
 
     def __init__(self, sfreq: int, timefreq_method: str='cwt',
                  model: Optional[ClusterMixin]=None, n_jobs: int = -1,
-                 scaling: bool=True, n_ica: int=0,
+                 scaling_method: str='standard', n_ica: int=0,
                  seed: int=2025):
         """
         Parameters
@@ -41,9 +42,13 @@ class SeizureClustering:
         n_jobs : int, optional
             Number of parallel jobs to run. \n
             Default is -1, which uses all available processors.
-        scaling : bool, optional
-            if true, the features will be standardised to ensure they
-            are on the same scale.
+        scaling_method : str, optional
+            Method used for scaling the features. \n
+            One of ['standard', 'none', 'patient']. \n
+            - 'standard': StandardScaler from sklearn.preprocessing
+            - 'none': No scaling applied
+            - 'patient': normalise by patient id stored in self.features_meta['id']
+            Default is 'standard'.
         n_ica : int, optional
             If a positive value given, ICA will be performed
             to reduce the dimension of the dataset.
@@ -53,18 +58,33 @@ class SeizureClustering:
         """
         self.sfreq = sfreq
         self.timefreq_method = timefreq_method
+        self.n_ica = n_ica
+        self.n_jobs = n_jobs
+        self.seed = seed
+
         if model is None:
             self.model = AgglomerativeClustering(n_clusters=2)
         else:
             self.model = model
-        self.scaling = scaling
-        self.n_ica = n_ica
-        if scaling:
+
+        self.scaling_method = scaling_method
+
+        if scaling_method == 'standard':
             self.scaler = StandardScaler()
+        elif scaling_method == 'patient':
+            self.scaler = BatchNormaliser()
+        elif scaling_method == 'none':
+            self.scaler = None
+        else:
+            raise ValueError(
+                f"Scaling method {scaling_method} not recognised. "
+                "Please provide one of ['standard', 'none', 'patient']"
+            )
+        
         if self.n_ica > 0:
             self.ica = FastICA(n_components=self.n_ica)
-        self.n_jobs = n_jobs
-        self.seed = seed
+
+        # runtime attributes
         self.labels = None
         self.features = None
         self.features_meta = {}
@@ -172,8 +192,12 @@ class SeizureClustering:
         self.extract_features(
             samples, sample_dict, feature_file)
 
-        if self.scaling:
+        if self.scaling_method == 'standard':
             features = self.scaler.fit_transform(self.features)
+        elif self.scaling_method == 'patient':
+            features = self.scaler.fit_transform(
+                self.features, self.features_meta['id']
+            )
         else:
             features = self.features
         
@@ -220,8 +244,12 @@ class SeizureClustering:
 
         self.extract_features(new_samples, sample_dict)
 
-        if self.scaling:
+        if self.scaling_method == 'standard':
             features = self.scaler.transform(self.features)
+        elif self.scaling_method == 'patient':
+            features = self.scaler.transform(
+                self.features, self.features_meta['id']
+            )
         else:
             features = self.features
 
@@ -232,7 +260,9 @@ class SeizureClustering:
 
         return self.labels
 
-    def get_cluster_sizes(self, verbose: bool=False):
+    def get_cluster_sizes(
+            self, verbose: bool=False
+        ) -> Dict[int, int]:
         """
         Prints the sizes of each cluster based
         on the cluster labels stored in self.labels. \n
@@ -289,8 +319,12 @@ class SeizureClustering:
         # Reduce features to 2D for visualization
         tsne = TSNE(n_components=2, random_state=self.seed)
 
-        if self.scaling:
+        if self.scaling_method == 'standard':
             features = self.scaler.transform(self.features)
+        elif self.scaling_method == 'patient':
+            features = self.scaler.transform(
+                self.features, self.features_meta['id']
+            )
         else:
             features = self.features
 
@@ -330,58 +364,7 @@ class SeizureClustering:
         else:
             plt.show()
 
-    def plot_k_distance(
-            self, feature_file: str, n_neighbors: int=5,
-            file_path: Optional[str]=None
-        ) -> None:
-        """
-        Used to judge the distance between points
-        for determining a suitable value of eps.
-
-        Parameters
-        -----------
-        feature_file : str
-            The file in which extracted features are saved.
-            It should contain a numpy array of shape
-            (n_samples, n_features)
-
-        n_neighbors : int, optional
-            Number of neighbours to consider for
-            each neighbourhood.
-
-        file_path : str, optional
-            If provided, the figure will be saved
-            instead of shown.
-        """
-        self.extract_features(feature_file=feature_file)
-
-        nn = NearestNeighbors(n_neighbors=n_neighbors)
-        if self.scaling:
-            features = self.scaler.fit_transform(self.features)
-        else:
-            features = self.features
-
-        if self.n_ica:
-            features = self.ica.fit_transform(features)
-
-        nn.fit(features)
-        distances, _ = nn.kneighbors(features)
-        distances = np.sort(distances[:, -1], axis=0)
-
-        # Plot the k-distance graph
-        plt.plot(distances)
-        plt.xlabel('Points', fontsize=16)
-        plt.ylabel(f'Distance to {n_neighbors}th nearest neighbor', fontsize=16)
-        plt.title('k-distance Graph', fontsize=20)
-
-        if file_path:
-            plt.savefig(file_path)
-            print(f'figure saved to {file_path}')
-            plt.close()
-        else:
-            plt.show()
-
-    def visualize_cluster_distances(
+    def plot_cluster_seizure_distances(
             self, file_path: Optional[str]=None) -> None:
         """
         Visualises the relation between cluster labels
@@ -392,12 +375,6 @@ class SeizureClustering:
         file_path : str, optional
             If provided, the figure will be saved
             instead of shown.
-
-        Notes
-        -----
-        np.inf distance values (no seizure in the recording)
-        will be replaced with a value larger than the
-        maximum distance for visualisation.
         """
         if self.labels is None:
             raise ValueError(
@@ -406,34 +383,37 @@ class SeizureClustering:
                 )
 
         if 'distances' in self.features_meta:
-            dists = self.features_meta['distances']
+            dists = self.features_meta['distances'] / self.sfreq
         else:
             print(f"Keys in features_meta: {self.features_meta.keys()}")
             raise ValueError(
                 "Distances must be set before visualizing."
                 )
 
-        valid_dists = dists[~np.isinf(dists)]
-        if len(valid_dists) > 0:
-            max_distance = np.nanmax(valid_dists)
-        else:
+        finite_mask = np.isfinite(dists)
+        infinite_mask = ~finite_mask
+
+        if np.all(infinite_mask):
             warnings.warn(
                 'None of self.dists is finite. '
                 'Histogram will not be plotted.'
             )
             return
 
-        dists_visual = np.where(
-            np.isinf(dists),
-            2*max_distance, dists)
-
         plt.figure(figsize=(10, 6))
-        plt.scatter(self.labels, dists_visual)
+        plt.scatter(self.labels[finite_mask], dists[finite_mask], alpha=0.7)
+
+        # plot infinite points
+        if np.any(infinite_mask):
+            plt.scatter(self.labels[infinite_mask],
+                np.full(np.sum(infinite_mask), np.max(dists[finite_mask]) * 1.5),
+                color='red', marker='x', label="Infinite Distances", alpha=0.7)
 
         # Labeling
         plt.title('Cluster Labels vs. Distance to Closest Seizure Period', fontsize=20)
         plt.xlabel('Cluster Labels', fontsize=16)
-        plt.ylabel('Distance to Closest Seizure Period', fontsize=16)
+        plt.ylabel('Time to Closest Seizure (s)', fontsize=16)
+        plt.legend(loc='lower center')
 
         if file_path:
             plt.savefig(file_path)
@@ -442,77 +422,73 @@ class SeizureClustering:
         else:
             plt.show()
 
-    def plot_histogram_dists(
-            self, cluster_ids: List[int], bins: int=30,
-            file_path: Optional[str]=None
-            ):
+    def plot_distances_seizures(
+            self, cluster_id: int,
+            file_path: Optional[str]=None):
         """
-        Plot the histogram of distances to the closest seizure period 
-        for samples in the specified cluster.
+        Generate a scatter plot of:
+        - Distances to seizure (`self.features_meta['distances']`) vs.
+        - Euclidean distance to the centroid of the largest cluster.
 
         Parameters
         ----------
-        cluster_ids : list of int or int
-            The indices of the cluster(s) for
-            which to plot the histogram of distances.
-        bins : int, optional
-            Number of bins used to plot the histogram.
+        cluster_id : int
+            The cluster whose samples will be plotted.
         file_path : str, optional
-            If provided, the figure will be saved
-            instead of shown.
+            If provided, the figure will be saved.
+            Otherwise, the figure will be shown.
 
         Raises
         ------
         ValueError
-            If the provided cluster_id is invalid (not found in self.labels).
-
-        Notes
-        -----
-        For visualisation, np.inf values will not be plotted. \n
-        But number of points with infinite distance
-        in this cluster will be printed. 
+            If the cluster_id is not found in self.labels.
         """
-        if isinstance(cluster_ids, int):
-            cluster_ids = [cluster_ids]
+        cluster_sizes = self.get_cluster_sizes()
+        if cluster_id not in cluster_sizes:
+            raise ValueError(
+                f"Invalid cluster ID {cluster_id}. "
+                f"Available clusters: {list(cluster_sizes.keys())}")
 
-        all_valid_dists = []
+        largest_cluster_id = max(cluster_sizes, key=cluster_sizes.get)
 
-        # Check if the cluster_id is valid
-        for cluster_id in cluster_ids:
-            if cluster_id not in np.unique(self.labels):
-                raise ValueError(
-                    f"Invalid cluster ID: {cluster_id}. "
-                    "Please provide a valid cluster ID.")
+        # Extract samples in the target cluster
+        cluster_mask = self.labels == cluster_id
+        cluster_features = self.features[cluster_mask]
+        cluster_dists = np.array(self.features_meta['distances'])[cluster_mask] / self.sfreq
 
-            dists_in_cluster = self.get_cluster_dists(cluster_id)
+        finite_mask = np.isfinite(cluster_dists)
+        infinite_mask = ~finite_mask
 
-            # check if all distances are inf
-            if np.all(np.isinf(dists_in_cluster)):
-                continue
+        # Extract samples in the largest cluster
+        largest_cluster_mask = self.labels == largest_cluster_id
+        largest_cluster_features = self.features[largest_cluster_mask]
 
-            valid_dists = dists_in_cluster[np.isfinite(dists_in_cluster)]
+        centroid_largest_cluster = np.mean(largest_cluster_features, axis=0)
 
-            all_valid_dists.extend(valid_dists)
-            if valid_dists.shape[0] < dists_in_cluster.shape[0]:
-                print(
-                    f'{dists_in_cluster.shape[0] - valid_dists.shape[0]} samples'
-                    f' in cluster {cluster_id} come from files with no seizure record'
-                )
+        euclidean_distances = cdist(
+            cluster_features, centroid_largest_cluster.reshape(1, -1)
+            ).flatten()
 
-        # Plot the histogram
-        if len(all_valid_dists) == 0:
-            warnings.warn(
-                'None of the distances are finite. '
-                'Histogram will not be plotted.'
-            )
-            return
+        # scatter plot
+        plt.figure(figsize=(10, 10))
+        plt.scatter(
+            cluster_dists[finite_mask],
+            euclidean_distances[finite_mask], alpha=0.7, edgecolors='k')
+        
+        if np.any(infinite_mask):
+            plt.scatter(
+                np.full(
+                    np.sum(infinite_mask),
+                    np.max(cluster_dists[finite_mask]) * 1.1), 
+                euclidean_distances[infinite_mask], color='red', marker='x', 
+                label="Infinite Distances", alpha=0.7)
 
-        plt.figure(figsize=(8, 6))
-        plt.hist(all_valid_dists, bins=bins, color='skyblue', edgecolor='black')
-        plt.title("Histogram of Distances to Seizure Periods"+ "\n" +
-                  f"for Clusters {cluster_ids}", fontsize=20)
-        plt.xlabel("Distance to Seizure (s)", fontsize=16)
-        plt.ylabel("Frequency", fontsize=16)
+        plt.xlabel("Time to Closest Seizure (s)", fontsize=16)
+        plt.ylabel("Distance to Largest Cluster", fontsize=16)
+        plt.title(
+            f"Cluster {cluster_id}: Seizure Distance vs. Distance to Largest Cluster",
+            fontsize=20)
+        plt.legend()
         plt.grid(True)
 
         if file_path:

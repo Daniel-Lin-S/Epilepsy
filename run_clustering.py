@@ -6,6 +6,7 @@ from models.clustering import SeizureClustering
 
 from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
 from sklearn.mixture import GaussianMixture
+from sklearn.svm import OneClassSVM
 import os
 import argparse
 
@@ -38,9 +39,15 @@ parser.add_argument('--n_clusters', type=int, default=3,
                     "Will not be used by DBSCAN.")
 parser.add_argument('--model', type=str, default='agglo',
                     help="The model used for clustering, "
-                    "one of ['agglo', 'kmeans', 'dbscan', 'gmm']"
+                    "one of ['agglo', 'kmeans', 'dbscan', 'gmm', 'svm']"
                     " where 'agglo' means Agglomerative Clustering, "
-                    "a hierarchical clustering method")
+                    "a hierarchical clustering method, "
+                    "and 'svm' means one-class SVM. "
+                    )
+parser.add_argument('--nu', type=float, default=0.1,
+                   help="nu parameter for one-class SVM. Default: 0.1")
+parser.add_argument('--esp', type=float, default=0.5,
+                    help="esp parameter for DBSCAN. Default: 0.5")
 
 # data
 parser.add_argument('--data_folder', type=str, default='./dataset',
@@ -105,21 +112,47 @@ if __name__ == '__main__':
 
     sfreq = read_sampling_rate(os.path.join(args.data_folder, 'summary.txt'))
 
+    # define the clustering model
     if args.model == 'agglo':
         model = AgglomerativeClustering(n_clusters=args.n_clusters)
     elif args.model == 'kmeans':
         model = KMeans(n_clusters=args.n_clusters, random_state=2025)
     elif args.model == 'dbscan':
-        model = DBSCAN()
+        model = DBSCAN(esp=args.esp)
     elif args.model == 'gmm':
         model = GaussianMixture(
             n_components=args.n_clusters,
             random_state=2025)
+    elif args.model == 'svm':
+        model = OneClassSVM(nu=args.nu)
     else:
-        raise ValueError("Invalid model name. Must be one of ['agglo', 'kmeans',"
-                         " 'dbscan', 'gmm']")
+        raise ValueError(
+            "Invalid model name. Must be one of ['agglo', 'kmeans',"
+            " 'dbscan', 'gmm']")
+    
+    if args.model == 'dbscan':
+        model_config = f'nica[{args.n_ica}]-esp[{args.esp}]'
+    elif args.model == 'svm':
+        model_config = f'nica[{args.n_ica}]-nu[{args.nu}]'
+    else:
+        model_config = f'k[{args.n_clusters}]-nica[{args.n_ica}]'
 
-    clustering = SeizureClustering(sfreq, model=model, n_ica=args.n_ica)
+    if args.patient_id is not None:
+        figure_folder = (
+            f'figures/{args.patient_id}-clustering-{args.model}'
+            f'-{sample_configs}-{model_config}'
+        )
+        scaling_method = 'standard'
+    else:
+        figure_folder = (
+            f'figures/clustering-{args.model}-{sample_configs}'
+            f'-{model_config}'
+        )
+        scaling_method = 'patient'
+
+    clustering = SeizureClustering(
+        sfreq, model=model, n_ica=args.n_ica,
+        scaling_method=scaling_method)
 
     if os.path.exists(feature_file):
         clustering.fit(feature_file=feature_file)
@@ -140,23 +173,12 @@ if __name__ == '__main__':
         clustering.fit(sample_dict['x'], sample_dict,
                     feature_file=feature_file)
 
-    if args.patient_id is not None:
-        figure_folder = (
-            f'figures/{args.patient_id}-clustering-{args.model}'
-            f'-{sample_configs}-k[{args.n_clusters}]-nica[{args.n_ica}]'
-        )
-    else:
-        figure_folder = (
-            f'figures/clustering-{args.model}-{sample_configs}'
-            f'-k[{args.n_clusters}]-nica[{args.n_ica}]'
-        )
-
     if not os.path.exists(figure_folder):
         os.makedirs(figure_folder)
 
     clustering.plot_clusters(
         file_path=os.path.join(figure_folder, f'tsne.png'))
-    clustering.visualize_cluster_distances(
+    clustering.plot_cluster_seizure_distances(
         file_path=os.path.join(figure_folder, f'cluster_dist.png'))
     clustering.evaluate_clusters()
 
@@ -166,18 +188,18 @@ if __name__ == '__main__':
     # considered as a seizure-related cluster
     if args.patient_id is None:
         # more allowance for clustering of all patients
-        max_cluster_size = 200
-        min_cluster_size = 11
+        max_cluster_size = 500
+        min_cluster_size = 10
     else:
         max_cluster_size = 100
-        min_cluster_size = 6
+        min_cluster_size = 5
 
     # search for major and minor classes
     major_size = 0
     major_class = None
 
     for label, size in cluster_sizes.items():
-        if size > major_size and label != -1:
+        if size > major_size:
             major_size = size
             major_class = label
 
@@ -193,8 +215,7 @@ if __name__ == '__main__':
             # check presence of minor clusters for each seizure
             for index in minor_classes:
                 clustering.cluster_seizure_comparison(index)
-
-        if len(minor_classes) > 0:
-            clustering.plot_histogram_dists(
-                minor_classes, bins=100,
-                file_path=os.path.join(figure_folder, 'hist_dist.png')) 
+                clustering.plot_distances_seizures(
+                    cluster_id=index,
+                    file_path=os.path.join(figure_folder, f'cluster{index}_dists')
+                )
