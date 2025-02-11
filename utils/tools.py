@@ -355,7 +355,7 @@ def check_seizure_overlap(
 def distance_to_closest_seizure(
         interval: Tuple[int, int],
         seizure_times: List[Tuple[int, int]]
-    ) -> int:
+    ) -> Tuple[int, int]:
     """
     Find the distance from a given interval to the closest seizure time.
 
@@ -372,11 +372,15 @@ def distance_to_closest_seizure(
 
     Returns
     -------
-    dist_to_seizure : float
-        The distance to the closest seizure start or end time. \n
-        Positive if the interval is preictal, 
+    dist_to_seizure : int
+        The distance to the closest seizure start or end time 
+        in the unit of time stamps. \n
+        Positive if the interval is preictal,
         negative if it is postictal,
         0 if it is right next to an ictal stage.
+    seizure_id : int
+        The index of the closest seizure in the
+        seizure_times list.
     
     Raise
     -----
@@ -396,7 +400,7 @@ def distance_to_closest_seizure(
     interval_start, interval_end = interval
     closest_distance = float('inf')
 
-    for (seizure_start, seizure_end) in seizure_times:
+    for i, (seizure_start, seizure_end) in enumerate(seizure_times):
         dist_pre = seizure_start - interval_end
         dist_post = interval_start - seizure_end
 
@@ -404,12 +408,14 @@ def distance_to_closest_seizure(
             # interval before seizure
             closest_distance = dist_pre
             postictal = False
+            seizure_id = i
         elif dist_post >= 0 and dist_post < closest_distance:
             # interval after seizure
             closest_distance = dist_post
             postictal = True
+            seizure_id = i
     
     if postictal:
-        return - closest_distance
+        return - closest_distance, seizure_id
     else:
-        return closest_distance
+        return closest_distance, seizure_id

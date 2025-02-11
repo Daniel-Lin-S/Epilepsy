@@ -67,18 +67,18 @@ def build_samples(
         - 'id' : numpy.ndarray of shape shape (num_samples,)
           the ids of the edf file from which each sample is taken from,
           each entry is a string.
-        - 'preictal_flag' : numpy.ndarray of shape shape (num_samples,)
-          if 1, the sample is taken based on an onset event.
-          if 0, the sample is taken randomly.
+        - 'seizure_ids' : numpy.ndarray of shape shape (num_samples,)
+          each value is integer.
+          if -1, the sample is not related to onset (seizure)
+          if i >= 0, the sample is taken before the i'th seizure period.
     """
     random.seed(seed)
     np.random.seed(seed)
 
     xs = []    # store EEG signals
     ys = []    # store labels / tags
-    ids = []   # 
-    # store flags for whether the sample is related to an onset event (seizure)
-    preictal_flags = []   
+    ids = []   # store the id of the edf file
+    seizure_ids = []   
     flag = True
 
     # Go through all the files in the directory
@@ -107,16 +107,15 @@ def build_samples(
                 seizure_times = read_seizure_times(seizure_file)
 
                 if mode == 'classification':
-                    ind_samples, ind_labels = get_classification_samples(
+                    ind_samples, ind_labels, ind_seizure_ids = get_classification_samples(
                         raw_data, seizure_times, selected_channels, seed, **kwargs)
-                    flags = ind_labels
                     n_samples = ind_samples.shape[0]
-                    id_marks = [file_id] * n_samples
+                    file_ids = [file_id] * n_samples
                 elif mode == 'clustering':
-                    ind_samples, ind_labels, flags = get_clustering_samples(
+                    ind_samples, ind_labels, ind_seizure_ids = get_clustering_samples(
                         raw_data, seizure_times, selected_channels, seed, **kwargs)
                     n_samples = ind_samples.shape[0]
-                    id_marks = [file_id] * n_samples
+                    file_ids = [file_id] * n_samples
                 else:
                     raise ValueError(
                         'Unsupported mode, must be one of [classification, clustering].'
@@ -125,8 +124,8 @@ def build_samples(
                 if n_samples != 0:
                     xs.append(ind_samples)
                     ys.append(ind_labels)
-                    ids.extend(id_marks)
-                    preictal_flags.append(flags)
+                    ids.extend(file_ids)
+                    seizure_ids.append(ind_seizure_ids)
 
     if flag:
         raise FileNotFoundError(
@@ -137,7 +136,7 @@ def build_samples(
     # Convert lists to numpy arrays and store them
     xs = np.concatenate(xs, axis=0)
     ys = np.concatenate(ys, axis=0)
-    preictal_flags = np.concatenate(preictal_flags, axis=0)
+    seizure_ids = np.concatenate(seizure_ids, axis=0, dtype=np.int8)
     ids = np.array(ids, dtype='S')
 
     if mode == 'classification':
@@ -157,13 +156,13 @@ def build_samples(
             f.create_dataset('x', data=xs)
             f.create_dataset('y', data=ys)
             f.create_dataset('id', data=ids)
-            f.create_dataset('preictal_flag', data=preictal_flags)
+            f.create_dataset('seizure_id', data=seizure_ids)
     
     output_dict = {
         'x' : xs,
         'y' : ys,
         'id' : ids,
-        'preictal_flag' : preictal_flags
+        'seizure_id' : seizure_ids
     }
     return output_dict
 
@@ -272,10 +271,11 @@ def get_classification_samples(
 
     Returns
     -------
-    Tuple[np.ndarray, np.ndarray]
+    Tuple[np.ndarray, np.ndarray, np.ndarray]
         A tuple of two numpy arrays:
         - samples of shape (n_samples, n_channels, sample_length)
         - labels of shape (n_samples,) 0 for not preictal, 1 for preictal
+        - ids of shape (n_samples,) the ids of the seizure periods
     """
     random.seed(seed)
     np.random.seed(seed)
@@ -338,13 +338,16 @@ def get_classification_samples(
     
     positive_samples = np.array(positive_samples)   # (n, dim)
     negative_samples = np.array(negative_samples)   # (n, dim)
+    seizure_ids_pos = np.arange(len(positive_samples))
+    seizure_ids_neg = np.array([-1] * len(negative_samples))
+    seizure_ids = np.concatenate([seizure_ids_pos, seizure_ids_neg], axis=0)
     samples = np.concatenate([positive_samples, negative_samples], axis=0)
     labels = np.concatenate(
         [np.ones(positive_samples.shape[0], dtype=np.int8),
          np.zeros(negative_samples.shape[0], dtype=np.int8)],
         axis=0)
 
-    return samples, labels
+    return samples, labels, seizure_ids
 
 
 def get_clustering_samples(
@@ -407,18 +410,17 @@ def get_clustering_samples(
         Positive distance: preictal,
         negative distance: postictal,
         nan: no seizure in the file.
-    flags : numpy.ndarray
+    seizure_ids : numpy.ndarray
         of shape (n_samples,). \n
-        Each entry indicates whether the sample
-        is taken before a seizure (1)
-        or randomly taken (0)
+        If -1, the sample is not related to onset (seizure)
+        If i >= 0, the sample is taken before the i'th seizure period.
     """
     random.seed(seed)
     np.random.seed(seed)
 
     samples = []
     dists_to_seizure = []
-    flags = []
+    seizure_ids = []
 
     sfreq = raw_data.info['sfreq']
 
@@ -455,9 +457,7 @@ def get_clustering_samples(
         dists_to_seizure.extend(dists_i)
         
         prev_end = seizure_end
-
-    n_onset = len(samples)
-    flags1 = np.ones(n_onset, dtype=np.int8)
+        seizure_ids.extend([i] * len(samples_i))
     
     # Add random intervals
     total_samples = len(raw_data_selected)
@@ -474,15 +474,15 @@ def get_clustering_samples(
             samples.append(sample)
             if len(seizure_times) == 0: # no seizure in the file
                 dist = np.inf
+                seizure_ids.append(-1)
             else:
-                dist = distance_to_closest_seizure(
+                dist, seizure_id = distance_to_closest_seizure(
                     (sample_start, sample_end), seizure_times)
+                seizure_ids.append(seizure_id)
+
             dists_to_seizure.append(dist)
 
-    flags0 = np.zeros(len(samples) - n_onset, dtype=np.int8)
-    flags = np.concatenate((flags1, flags0))
-    
-    return np.array(samples), np.array(dists_to_seizure), flags
+    return np.array(samples), np.array(dists_to_seizure), np.array(seizure_ids)
 
 def sliding_window(
         raw_data_selected: RawEDF,
