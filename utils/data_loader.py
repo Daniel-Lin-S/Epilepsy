@@ -11,8 +11,6 @@ from utils.preprocess import read_seizure_times
 from utils.tools import check_labels, check_seizure_overlap, distance_to_closest_seizure
 
 
-# TODO - add other modes of sample balancing (only downsampling now)
-
 def build_samples(
         folder_path: str, output_file: Optional[str]=None,
         selected_channels: Optional[List[str]]=None,

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-read -p "enter the name of h5 sample file (no postfix)" SAMPLE_NAME
+read -p "enter the name of h5 sample file (no postfix): " SAMPLE_NAME
 SAMPLE_PATH="./samples/clustering/$SAMPLE_NAME.h5"
 TF_METHOD='cwt'
 FEATURE_REPO="./samples/timefreq"

@@ -214,8 +214,9 @@ if __name__ == '__main__':
         if args.patient_id is None:
             # check presence of minor clusters for each seizure
             for index in minor_classes:
-                clustering.cluster_seizure_comparison(index)
+                clustering.evaluate_cluster_pre_seizure(cluster_id=index)
                 clustering.plot_distances_seizures(
                     cluster_id=index,
-                    file_path=os.path.join(figure_folder, f'cluster{index}_dists')
+                    file_path=os.path.join(
+                        figure_folder, f'cluster{index}_dists')
                 )

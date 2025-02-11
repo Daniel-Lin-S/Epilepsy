@@ -6,7 +6,7 @@ from sklearn.manifold import TSNE
 from sklearn.decomposition import FastICA
 from scipy.spatial.distance import cdist
 import matplotlib.pyplot as plt
-from typing import Optional, List, Union, Dict
+from typing import Optional, Dict
 import os
 import h5py
 import warnings
@@ -64,6 +64,10 @@ class SeizureClustering:
 
         if model is None:
             self.model = AgglomerativeClustering(n_clusters=2)
+        elif 'predict' not in dir(model) or 'fit_predict' not in dir(model):
+            raise ValueError(
+                "Model must have 'fit_predict' and 'predict' methods."
+            )
         else:
             self.model = model
 
@@ -173,12 +177,15 @@ class SeizureClustering:
         samples : np.ndarray, optional
             Array of shape (num_samples, num_channels, sample_length)
             representing the time series samples. \n
-            Must be provided if feature_file is not given
-            or features have not been extracted.
-        sample_dict : np.ndarray
+            Must be provided if `feature_file` is not given
+            or features have not been extracted into `feature_file`.
+        sample_dict : np.ndarray, optional
             Dictionary with meta-information relating
-            to the samples, e.g. distance to seizure,
-            sample id (original file)
+            to the samples for evaluation. \n
+            - 'distances' or 'y': distances to the closest
+              seizure periods (in time stamps)
+            - 'id': patient/file id
+            - 'seizure_id': id of the closest seizure period
         feature_file : str, optional
             If provided, the extracted features will be saved
             or read from the file. \n
@@ -220,7 +227,8 @@ class SeizureClustering:
 
     def predict(
             self, new_samples: np.ndarray,
-            sample_dict: Optional[dict]) -> np.ndarray:
+            sample_dict: Optional[dict]
+        ) -> np.ndarray:
         """
         Predict the cluster labels for new samples.
 
@@ -229,10 +237,11 @@ class SeizureClustering:
         new_samples : np.ndarray
             Array of shape (num_samples, num_channels, sample_length)
             representing the new time series samples.
-        sample_dict : np.ndarray
+        sample_dict : np.ndarray, optional
             Dictionary with meta-information relating
-            to the samples, e.g. distance to seizure,
-            sample id (original file)
+            to the samples. \n
+            Not necessary when using this model
+            for prediction only.
 
         Returns
         -------
@@ -365,7 +374,8 @@ class SeizureClustering:
             plt.show()
 
     def plot_cluster_seizure_distances(
-            self, file_path: Optional[str]=None) -> None:
+            self, file_path: Optional[str]=None
+        ) -> None:
         """
         Visualises the relation between cluster labels
         and distances to the closest seizure period.
@@ -424,7 +434,8 @@ class SeizureClustering:
 
     def plot_distances_seizures(
             self, cluster_id: int,
-            file_path: Optional[str]=None):
+            file_path: Optional[str]=None
+        ) -> None:
         """
         Generate a scatter plot of:
         - Distances to seizure (`self.features_meta['distances']`) vs.
@@ -437,12 +448,21 @@ class SeizureClustering:
         file_path : str, optional
             If provided, the figure will be saved.
             Otherwise, the figure will be shown.
-
-        Raises
-        ------
-        ValueError
-            If the cluster_id is not found in self.labels.
         """
+        if self.features_meta is None:
+            raise ValueError(
+                "Please ensure that `fit` or `predict` has been called"
+                " with `sample_dict` provided."
+            )
+        
+        try:
+            dists_to_seizures = self.features_meta['distances']
+        except KeyError:
+            raise KeyError(
+                "Please ensure that 'distances' is included "
+                "in `sample_dict` when running `fit` or `predict`."
+            )
+
         cluster_sizes = self.get_cluster_sizes()
         if cluster_id not in cluster_sizes:
             raise ValueError(
@@ -454,7 +474,7 @@ class SeizureClustering:
         # Extract samples in the target cluster
         cluster_mask = self.labels == cluster_id
         cluster_features = self.features[cluster_mask]
-        cluster_dists = np.array(self.features_meta['distances'])[cluster_mask] / self.sfreq
+        cluster_dists = np.array(dists_to_seizures)[cluster_mask] / self.sfreq
 
         finite_mask = np.isfinite(cluster_dists)
         infinite_mask = ~finite_mask
@@ -498,12 +518,15 @@ class SeizureClustering:
         else:
             plt.show()
 
-    def evaluate_clusters(self):
-        if self.labels is None:
-            raise ValueError("Labels have not been computed yet.")
-
-        if self.features is None:
-            raise ValueError("Features have not been extracted yet.")
+    def evaluate_clusters(self) -> None:
+        """
+        Evaluate the clustering results
+        by calculating the average within-cluster distance,
+        average between-cluster distance, and separation index.
+        """
+        if self.labels is None or self.features is None:
+            raise ValueError(
+                "Please run `fit` or `predict` first.")
 
         unique_labels = np.unique(self.labels)
         num_clusters = len(unique_labels)
@@ -549,3 +572,72 @@ class SeizureClustering:
         print(f"Average within-cluster distance: {mean_within_distance}")
         print(f"Average between-cluster distance: {mean_between_distance}")
         print(f"Separation index: {separation_index}")
+
+    def evaluate_cluster_pre_seizure(self, cluster_id: int) -> None:
+        """
+        Evaluate how many pre-seizure periods are
+        included in the given cluster
+        and how many non-seizure related samples
+        are also in this cluster.
+
+        Parameters
+        ----------
+        cluster_id : int
+            The cluster to evaluate.
+        """
+        # Extract relevant metadata
+        if self.labels is None:
+            raise ValueError(
+                "Please call `fit` or `predict` first. "
+            )
+        else:
+            labels = self.labels
+
+        if self.features_meta is None:
+            raise ValueError(
+                "Please ensure that `fit` or `predict` has been called"
+                " with `sample_dict` provided."
+            )
+
+        try:
+            seizure_ids = self.features_meta['seizure_id']
+        except KeyError:
+            raise KeyError(
+                "Seizure IDs not found in self.features_meta. "
+                "Please ensure that 'seizure_id' is included "
+                "in `sample_dict` when running `fit`."
+            )
+        try:
+            sample_ids = self.features_meta['id']
+        except KeyError:
+            raise KeyError(
+                "Sample IDs not found in self.features_meta. "
+                "Please ensure that 'id' is included "
+                "in `sample_dict` when running `fit`."
+            )
+
+        # Find total number of unique pre-seizure periods
+        pre_seizure_mask = seizure_ids != -1
+        unique_pre_seizures = set(zip(
+            sample_ids[pre_seizure_mask], seizure_ids[pre_seizure_mask]))
+        total_pre_seizures = len(unique_pre_seizures)
+
+        # Find pre-seizure periods inside the given cluster
+        cluster_mask = labels == cluster_id
+        pre_seizure_in_cluster = set(
+            zip(sample_ids[cluster_mask & pre_seizure_mask],
+                seizure_ids[cluster_mask & pre_seizure_mask]))
+        num_pre_seizure_in_cluster = len(pre_seizure_in_cluster)
+
+        # Compute ratio of pre-seizure periods captured
+        if total_pre_seizures > 0:
+            print(
+                "Pre-seizure periods captured: "
+                f"{num_pre_seizure_in_cluster} / {total_pre_seizures}")
+        else:
+            print('No pre-seizure periods found.')
+
+        # Count non-seizure-related samples in the cluster
+        non_seizure_samples = np.sum(cluster_mask & ~pre_seizure_mask)
+        print("Non-seizure related samples in cluster "
+              f"{cluster_id}: {non_seizure_samples}")
