@@ -12,6 +12,7 @@ import h5py
 import warnings
 
 from utils.feature_extraction import extract_features_timefreq
+from utils.data_loader import read_samples
 from layers.normaliser import BatchNormaliser
 
 
@@ -19,6 +20,37 @@ class SeizureClustering:
     """
     A model for unsupervised clustering of time series data
     The model uses clustering algorithms to group the data into clusters.
+
+    Attributes
+    ----------
+    sfreq : int
+        Sampling frequency of the time series data.
+    timefreq_method : str
+        Method used for feature extraction.
+        See docstring of `feature_extraction.extract_features_timefreq`
+    model : sklearn.base.ClusterMixin
+        Instance of a clustering model specified in sklearn,
+        or self-defined instance with functions fit_predict
+        and predict provided.
+    n_jobs : int
+        Number of parallel jobs to run.
+    scaling_method : str
+        Method used for scaling the features.
+        One of ['standard', 'none', 'patient'].
+    features : np.ndarray
+        Array of shape (num_samples, n_features)
+        representing the extracted features. \n
+        Will be normalised if scaling_method is not 'none'.
+    features_meta : dict
+        Dictionary with meta-information relating
+        to the samples, e.g. distance to seizure,
+        sample id (original file).
+    labels : np.ndarray
+        1 dimensional array of cluster labels for the samples.
+    scaler : Any
+        Scaler used for normalising the features.
+    ica : FastICA
+        ICA model used for dimensionality reduction.
     """
 
     def __init__(self, sfreq: int, timefreq_method: str='cwt',
@@ -95,7 +127,7 @@ class SeizureClustering:
 
     def extract_features(
             self, samples: Optional[np.ndarray]=None,
-            sample_dict: Optional[dict]=None,
+            meta_dict: Optional[dict]=None,
             feature_file: Optional[str]=None):
         """
         Extract features from the time series samples
@@ -110,7 +142,7 @@ class SeizureClustering:
             Array of shape (num_samples, num_channels, sample_length)
             representing the time series samples. \n
             If not provided, will be read from h5 file
-        sample_dict : np.ndarray, optional.
+        meta_dict : np.ndarray, optional.
             Dictionary with meta-information relating
             to the samples, e.g. distance to seizure,
             sample id (original file). \n
@@ -128,24 +160,19 @@ class SeizureClustering:
         self.features_meta = {}
 
         if feature_file is not None and os.path.exists(feature_file):
-            with h5py.File(feature_file, 'r') as f:
-                self.features = f['features'][:]
+            # read features and meta information
+            feature_dict = read_samples(
+                feature_file, samples_only=False, handle_str=False)
 
-                for key in f.keys():
-                    if key == 'y' or key == 'dist':
-                        self.features_meta['distances'] = f[key][:]
-                    elif key != 'features':
-                        self.features_meta[key] = f[key][:]
+            self.features = feature_dict['features']
+            self._assign_meta(feature_dict)
 
         elif samples is not None:
             print('Extracting features ...')
             self.features = extract_features_timefreq(
                 samples, self.sfreq, self.timefreq_method, self.n_jobs)
-            if sample_dict:  # record meta information
-                self.features_meta['distances'] = sample_dict['y']
-                for key in sample_dict.keys():
-                    if key != 'x' and key != 'y':
-                        self.features_meta[key] = sample_dict[key]
+            if meta_dict:  # record meta information
+                self._assign_meta(meta_dict)
 
             # Store features as a dataset in the HDF5 file
             if feature_file is not None:
@@ -164,7 +191,8 @@ class SeizureClustering:
     def fit(
             self,
             samples: Optional[np.ndarray]=None,
-            sample_dict: Optional[dict]=None,
+            meta_dict: Optional[dict]=None,
+            features: Optional[np.ndarray]=None,
             feature_file: Optional[str]=None,
             verbose: bool=True
         ):
@@ -179,7 +207,12 @@ class SeizureClustering:
             representing the time series samples. \n
             Must be provided if `feature_file` is not given
             or features have not been extracted into `feature_file`.
-        sample_dict : np.ndarray, optional
+        features : np.ndarray, optional
+            Array of shape (num_samples, n_features)
+            representing the extracted features. \n
+            If this is given,
+            samples, feature_file are not required.
+        meta_dict : np.ndarray, optional
             Dictionary with meta-information relating
             to the samples for evaluation. \n
             - 'distances' or 'y': distances to the closest
@@ -196,27 +229,31 @@ class SeizureClustering:
             If true, print the training processes
             and the cluster sizes
         """
-        self.extract_features(
-            samples, sample_dict, feature_file)
+        if features:
+            self.features = features
+            if meta_dict:  # record meta information
+                self._assign_meta(meta_dict)
+        else: # extract or read features
+            self.extract_features(
+                samples, meta_dict, feature_file)
 
         if self.scaling_method == 'standard':
-            features = self.scaler.fit_transform(self.features)
+            self.features = self.scaler.fit_transform(self.features)
         elif self.scaling_method == 'patient':
-            features = self.scaler.fit_transform(
+            self.features = self.scaler.fit_transform(
                 self.features, self.features_meta['id']
             )
-        else:
-            features = self.features
         
-        if self.n_ica > 0 and self.n_ica < min(features.shape[0], features.shape[1]):
+        if self.n_ica > 0 and self.n_ica < min(
+            self.features.shape[0], self.features.shape[1]):
             if verbose:
                 print(f'Reducing dimension to {self.n_ica} using ICA ...')
-            features = self.ica.fit_transform(features)
+            features = self.ica.fit_transform(self.features)
         elif self.n_ica > 0:
             raise ValueError(
                 f'n_ica ({self.n_ica}) cannot exceed total '
-                f'number of features: {features.shape[1]} and '
-                f'number of samples {features.shape[0]}.'
+                f'number of features: {self.features.shape[1]} and '
+                f'number of samples {self.features.shape[0]}.'
             )
 
         if verbose:
@@ -227,7 +264,7 @@ class SeizureClustering:
 
     def predict(
             self, new_samples: np.ndarray,
-            sample_dict: Optional[dict]
+            meta_dict: Optional[dict]
         ) -> np.ndarray:
         """
         Predict the cluster labels for new samples.
@@ -237,7 +274,7 @@ class SeizureClustering:
         new_samples : np.ndarray
             Array of shape (num_samples, num_channels, sample_length)
             representing the new time series samples.
-        sample_dict : np.ndarray, optional
+        meta_dict : np.ndarray, optional
             Dictionary with meta-information relating
             to the samples. \n
             Not necessary when using this model
@@ -251,19 +288,17 @@ class SeizureClustering:
         if self.model is None:
             raise ValueError("Model is not fitted yet. Please call 'fit' first.")
 
-        self.extract_features(new_samples, sample_dict)
+        self.extract_features(new_samples, meta_dict)
 
         if self.scaling_method == 'standard':
-            features = self.scaler.transform(self.features)
+            self.features = self.scaler.transform(self.features)
         elif self.scaling_method == 'patient':
-            features = self.scaler.transform(
+            self.features = self.scaler.transform(
                 self.features, self.features_meta['id']
             )
-        else:
-            features = self.features
 
         if self.n_ica:
-            features = self.ica.transform(features)
+            features = self.ica.transform(self.features)
 
         self.labels = self.model.predict(features)
 
@@ -452,7 +487,7 @@ class SeizureClustering:
         if self.features_meta is None:
             raise ValueError(
                 "Please ensure that `fit` or `predict` has been called"
-                " with `sample_dict` provided."
+                " with `meta_dict` provided."
             )
         
         try:
@@ -460,7 +495,7 @@ class SeizureClustering:
         except KeyError:
             raise KeyError(
                 "Please ensure that 'distances' is included "
-                "in `sample_dict` when running `fit` or `predict`."
+                "in `meta_dict` when running `fit` or `predict`."
             )
 
         cluster_sizes = self.get_cluster_sizes()
@@ -596,7 +631,7 @@ class SeizureClustering:
         if self.features_meta is None:
             raise ValueError(
                 "Please ensure that `fit` or `predict` has been called"
-                " with `sample_dict` provided."
+                " with `meta_dict` provided."
             )
 
         try:
@@ -605,7 +640,7 @@ class SeizureClustering:
             raise KeyError(
                 "Seizure IDs not found in self.features_meta. "
                 "Please ensure that 'seizure_id' is included "
-                "in `sample_dict` when running `fit`."
+                "in `meta_dict` when running `fit`."
             )
         try:
             sample_ids = self.features_meta['id']
@@ -613,7 +648,7 @@ class SeizureClustering:
             raise KeyError(
                 "Sample IDs not found in self.features_meta. "
                 "Please ensure that 'id' is included "
-                "in `sample_dict` when running `fit`."
+                "in `meta_dict` when running `fit`."
             )
 
         # Find total number of unique pre-seizure periods
@@ -623,12 +658,21 @@ class SeizureClustering:
         total_pre_seizures = len(unique_pre_seizures)
 
         # Find pre-seizure periods inside the given cluster
-        cluster_mask = labels == cluster_id
-        pre_seizure_in_cluster = set(
-            zip(sample_ids[cluster_mask & pre_seizure_mask],
-                seizure_ids[cluster_mask & pre_seizure_mask]))
-        num_pre_seizure_in_cluster = len(pre_seizure_in_cluster)
+        seizure_counts = []
 
+        cluster_mask = labels == cluster_id
+        for pre_seizure in unique_pre_seizures:
+            n_points = np.sum(
+                cluster_mask & (sample_ids == pre_seizure[0]) & (
+                    seizure_ids == pre_seizure[1]))
+            
+            seizure_counts.append(n_points)
+
+        num_pre_seizure_in_cluster = np.sum(
+            np.array(seizure_counts) > 0)
+
+        print('Number of cluster points in each pre-seizure period: {}'.format(
+            seizure_counts))
         # Compute ratio of pre-seizure periods captured
         if total_pre_seizures > 0:
             print(
@@ -641,3 +685,20 @@ class SeizureClustering:
         non_seizure_samples = np.sum(cluster_mask & ~pre_seizure_mask)
         print("Non-seizure related samples in cluster "
               f"{cluster_id}: {non_seizure_samples}")
+    
+    def _assign_meta(self, meta_dict: dict):
+        """
+        Assign given dictionary with meta information
+        to self.features_meta. \n
+        Keys 'y' and 'dist' will be interpreted
+        as 'distances'.
+        """
+        self.features_meta = {}
+
+        for key in meta_dict.keys():
+            if key == 'x' or key == 'features':
+                continue
+            if key == 'y' or key == 'dist':
+                self.features_meta['distances'] = meta_dict[key]
+            else:
+                self.features_meta[key] = meta_dict[key]

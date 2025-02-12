@@ -6,7 +6,9 @@ import numpy as np
 
 
 class RiskPredictionNN(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, lr: float = 1e-3):
+    def __init__(
+            self, input_dim: int, hidden_dim: int,
+            lr: float = 1e-3, dropout_rate=0.3):
         """
         Parameters
         ----------
@@ -14,19 +16,25 @@ class RiskPredictionNN(nn.Module):
             Dimension of input tensor.
         hidden_dim : int
             Dimension of hidden layer.
-        lr : float
+        lr : float, optional
             Learning rate for optimizer.
+        dropout_rate : float, optional
+            Dropout rate for regularisation.
         """
         super(RiskPredictionNN, self).__init__()
+
+        # layers
         self.fc = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
+            nn.LeakyReLU(),
+            nn.Dropout(dropout_rate),
             nn.Linear(hidden_dim, 1),
-            nn.Sigmoid()  # Output risk probability
+            nn.Sigmoid()
         )
 
-        # Loss function & optimizer
-        self.criterion = nn.BCELoss()  # Binary Cross-Entropy Loss
+        # Binary Cross-Entropy Loss
+        self.criterion = nn.BCELoss()
+
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -64,7 +72,20 @@ class RiskPredictionNN(nn.Module):
             Batch size for training
         """
         # Convert data to PyTorch tensors
-        y_train = y_train.unsqueeze(1).float()
+        if y_train.ndim == 1:
+            y_train = y_train.unsqueeze(1).float()
+        elif y_train.ndim == 2:
+            if y_train.shape[1] == 1:
+                y_train = y_train.float()
+            else:
+                raise ValueError(
+                    "y_train should have 1 column "
+                    "for binary classification, got shape"
+                    f" {y_train.shape}.")
+        else:
+            raise ValueError(
+                "y_train should have shape (n_samples, 1) or (n_samples,)"
+                f"got shape {y_train.shape}.")
 
         dataset = torch.utils.data.TensorDataset(X_train, y_train)
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -118,3 +139,21 @@ class RiskPredictionNN(nn.Module):
         risk_labels = (risk_prob > threshold).astype(int)
 
         return risk_prob, risk_labels
+    
+    def get_latent(self, X: torch.Tensor) -> np.ndarray:
+        """
+        Get latent representation (the hidden layer
+        before activation).
+        
+        Parameters
+        ----------
+        X : torch.Tensor
+            Input tensor of shape (n_samples, input_dim).
+        
+        Returns
+        -------
+        np.ndarray
+            Latent representation of input data of shape
+            (n_samples, hidden_dim).
+        """
+        return self.fc[0](X).detach().numpy()

@@ -1,6 +1,4 @@
 import numpy as np
-from sklearn.metrics import precision_recall_curve, roc_curve, auc
-import matplotlib.pyplot as plt
 
 
 def calculate_c_index(
@@ -8,6 +6,7 @@ def calculate_c_index(
         event_observed: np.ndarray) -> float:
     """
     Computes the Concordance Index (C-index) for survival analysis.
+    Only positive times (pre-event) are considered.
 
     Parameters:
     -----------
@@ -24,7 +23,7 @@ def calculate_c_index(
         Concordance Index (C-index).
     """
     # Mask to ignore censored cases (where event_observed == 0)
-    mask_event = event_observed == 1
+    mask_event = (event_observed == 1) & (y_true_time >= 0)
     true_times = y_true_time[mask_event]
     predicted_times = y_pred_time[mask_event]
 
@@ -47,50 +46,3 @@ def calculate_c_index(
 
     c_index = (concordant + 0.5 * tied) / (concordant + discordant + tied)
     return c_index
-
-
-def plot_pr_curve(y_true: np.ndarray, y_pred_proba: np.ndarray) -> None:
-    """
-    Plot the Precision-Recall curve.
-    Used to evaluate probablistic binary classifiers.
-
-    Parameters:
-    -----------
-    y_true : numpy.ndarray
-        Ground truth labels.
-    y_pred_proba : numpy.ndarray
-        Predicted probabilities.
-    """
-    precision, recall, thresholds = precision_recall_curve(
-        y_true, y_pred_proba)
-    
-    plt.plot(thresholds, precision[:-1],
-             label="Precision", linestyle="--", color="blue")
-    plt.plot(thresholds, recall[:-1],
-             label="Recall", linestyle="-", color="red")
-
-    plt.xlabel("Threshold")
-    plt.ylabel("Recall")
-    plt.title("Recall vs. Threshold")
-    plt.legend()
-    plt.show()
-
-
-def plot_roc_curve(y_true: np.ndarray, y_pred_proba: np.ndarray) -> None:
-    fpr, tpr, _ = roc_curve(y_true, y_pred_proba)
-
-    # Compute AUC (Area Under Curve)
-    roc_auc = auc(fpr, tpr)
-
-    # Plot ROC Curve
-    plt.figure(figsize=(8, 6))
-    plt.plot(fpr, tpr, color='red', label=f"ROC Curve (AUC = {roc_auc:.2f})")
-    plt.plot([0, 1], [0, 1], linestyle="--", color="gray",
-             label="Random Model (AUC = 0.50)")
-
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate (Recall)")
-    plt.title("Receiver Operating Characteristic (ROC) Curve")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
